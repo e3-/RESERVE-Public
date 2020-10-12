@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 ## User inputs
 # Paths to raw data files and store outputs
 path_to_raw_data = os.path.join(os.getcwd(), "inputs_to_code")
-raw_data_file_name = "raw_data_dummy.csv"
+raw_data_file_name = "input_for_M_by_N_creating_sript.csv"
 path_to_store_outputs_at = os.path.join(os.getcwd(), "outputs_from_code")
 trainval_inputs_data_file_name = "trainval_inputs.pkl"
 trainval_output_data_file_name = "trainval_output.pkl"
@@ -95,7 +95,6 @@ def calculate_calendar_based_inputs(datetime_arr, longitude, time_difference_fro
     if start_date == None:
         start_date = datetime_arr[0]
     days_from_start_date_arr = (datetime_arr - start_date).days
-    print(days_from_start_date_arr)
 
     return solar_hour_angle_arr, solar_day_angle_arr, days_from_start_date_arr
 
@@ -124,7 +123,7 @@ datetimes_for_trainval_data_arr = np.empty((num_of_lag_terms + 2, num_of_time_po
 datetimes_for_trainval_data_arr[:] = np.nan
 
 ## Creating and saving trainval samples
-
+print("Have begun creating trainval samples....")
 # Iterate over each potential time point in raw data that we can create a trainval sample for
 for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
     time_pt_can_be_converted_to_trainval_sample = True
@@ -134,7 +133,7 @@ for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
         for mtd in main_timeseries_data:
             if raw_data_df.loc[tied_time_pt, mtd + forecast_suffix + ignore_flag_suffix]:
                 time_pt_can_be_converted_to_trainval_sample = False
-                print("{} Forecast invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
+                # print("{} Forecast invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
                 break
 #     # Next check validity of actuals
 #     if time_pt_can_be_converted_to_trainval_sample:
@@ -148,7 +147,7 @@ for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
                 for mtd in main_timeseries_data:
                     if raw_data_df.loc[tied_time_pt, mtd + forecast_error_suffix + ignore_flag_suffix]:
                         time_pt_can_be_converted_to_trainval_sample = False
-                        print("{} Forecast error invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
+                        # print("{} Forecast error invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
                         break
     
     # If all data points needed are valid, turn current time pt into a trainval sample
