@@ -10,3 +10,5 @@ Characteristics includes:
 4. Model agnostic. No requirement on knowledge of the inner workings of the netload forecast
 
 Stay tuned for more details to come.
+
+Charlie's downstream change.
