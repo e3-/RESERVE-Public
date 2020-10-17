@@ -29,6 +29,8 @@ time_difference_from_UTC = -8 # hours. Timestamps for input data are in PST
 #start_date =
 # Stuff in raw data file
 # Main types of timerseries data- Names should match those in raw data file
+# Whatever the column header is, the first entry should be associated with load and resources can then follow.
+# Important for net load calcs to follow later in the script
 main_timeseries_data = ["Load", "Solar", "Wind"]
 # Suffixes for column names used in raw data file
 forecast_suffix = "_Forecast"
@@ -42,6 +44,7 @@ forecast_error_suffix = "_Forecast_Error"
 hour_angle_col_name = "Hour_Angle"
 day_angle_col_name = "Day_Angle"
 days_from_start_date_col_name = "Days_from_Start_Date"
+net_load_forecast_error_col_name = "Net_Load_Forecast_Error"
 # Labels for all predictors. Order must match order in which these'll be populated in the MxN array
 labels_for_predictors = ["Load_Forecast_T-2", "Load_Forecast_T-1", "Load_Forecast_T0", "Load_Forecast_T+1", \
                          "Solar_Forecast_T-2", "Solar_Forecast_T-1", "Solar_Forecast_T0", "Solar_Forecast_T+1", \
@@ -49,8 +52,8 @@ labels_for_predictors = ["Load_Forecast_T-2", "Load_Forecast_T-1", "Load_Forecas
                          "Load_Forecast_Error_T-2", "Load_Forecast_Error_T-1", \
                          "Solar_Forecast_Error_T-2", "Solar_Forecast_Error_T-1", \
                          "Wind_Forecast_Error_T-2", "Wind_Forecast_Error_T-1", \
-                         "Solar_Hour_Angle", "Solar_Day_Angle", "Num_Days_from_Start_Date"]
-labels_for_response = ["ML_Model_Output_T+1"]
+                         "Solar_Hour_Angle_T+1", "Solar_Day_Angle_T+1", "Num_Days_from_Start_Date_T+1"]
+labels_for_response = ["Net_Load_Forecast_Error_T+1"]
 
 
 ## Helper functions
@@ -103,10 +106,18 @@ def calculate_calendar_based_inputs(datetime_arr, longitude, time_difference_fro
 raw_data_df = pd.read_csv(os.path.join(path_to_raw_data, raw_data_file_name))
 num_of_time_points = raw_data_df.shape[0]
 # Add other columns to raw data - forecast error, calendar terms, etc
-for mtd in main_timeseries_data:
+for mtd_idx, mtd in enumerate(main_timeseries_data):
     raw_data_df[mtd + forecast_error_suffix] = raw_data_df[mtd + actual_suffix] - raw_data_df[mtd + forecast_suffix]
     raw_data_df[mtd + forecast_error_suffix + ignore_flag_suffix] = raw_data_df[mtd + actual_suffix + ignore_flag_suffix] & \
                                                                     raw_data_df[mtd + forecast_suffix + ignore_flag_suffix]
+    # Calculation of net load forecast error-used as response variable
+    if mtd_idx == 0: # Load
+        raw_data_df[net_load_forecast_error_col_name] = raw_data_df[mtd + forecast_error_suffix]
+        raw_data_df[net_load_forecast_error_col_name + ignore_flag_suffix] = raw_data_df[mtd + forecast_error_suffix + ignore_flag_suffix]
+    else: # Resources
+        raw_data_df[net_load_forecast_error_col_name] = raw_data_df[net_load_forecast_error_col_name] - raw_data_df[mtd + forecast_error_suffix]
+        raw_data_df[net_load_forecast_error_col_name + ignore_flag_suffix] = raw_data_df[net_load_forecast_error_col_name + ignore_flag_suffix] & \
+                                                                             raw_data_df[mtd + forecast_error_suffix + ignore_flag_suffix]
 
 # Calculation of calendar terms
 print("Calculating calendar-based inputs....")
@@ -128,20 +139,14 @@ print("Have begun creating trainval samples....")
 for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
     time_pt_can_be_converted_to_trainval_sample = True
     # Check validity of data at all time points tied to this one in a given trainval sample
-    # First check validity of forecasts
+    # First check validity of forecasts to be used as predictors
     for tied_time_pt in range(time_pt - num_of_lag_terms, time_pt + 2):
         for mtd in main_timeseries_data:
             if raw_data_df.loc[tied_time_pt, mtd + forecast_suffix + ignore_flag_suffix]:
                 time_pt_can_be_converted_to_trainval_sample = False
                 # print("{} Forecast invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
                 break
-#     # Next check validity of actuals
-#     if time_pt_can_be_converted_to_trainval_sample:
-#         for mtd in main_timeseries_data:
-#             if raw_data_df.loc[time_pt + 1, mtd + actual_suffix + ignore_flag_suffix]:
-#                 time_pt_can_be_converted_to_trainval_sample = False
-#                 break
-    # Next check validity of forecast errors
+    # Next check validity of forecast errors to be used as predictors
     if time_pt_can_be_converted_to_trainval_sample:
             for tied_time_pt in range(time_pt - num_of_lag_terms, time_pt):
                 for mtd in main_timeseries_data:
@@ -149,7 +154,11 @@ for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
                         time_pt_can_be_converted_to_trainval_sample = False
                         # print("{} Forecast error invalid at {}".format(mtd, raw_data_df.loc[tied_time_pt, datetime_col_name]))
                         break
-    
+    # Now check validity of response variable(s)
+    if time_pt_can_be_converted_to_trainval_sample:
+        if raw_data_df.loc[time_pt + 1, net_load_forecast_error_col_name + ignore_flag_suffix]:
+            time_pt_can_be_converted_to_trainval_sample = False
+
     # If all data points needed are valid, turn current time pt into a trainval sample
     if time_pt_can_be_converted_to_trainval_sample:
         # First collect inputs for this trainval sample
@@ -169,9 +178,8 @@ for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
         trainval_inputs_data_arr[start_idx + 1, time_pt] = raw_data_df.loc[time_pt + 1, day_angle_col_name]
         trainval_inputs_data_arr[start_idx + 2, time_pt] = raw_data_df.loc[time_pt + 1, days_from_start_date_col_name]
         
-        # Next collect output for this trainval sample
-        # TODO: Once loss function is defined, determing what this will be. Alternatively, can do this in ML model script
-        trainval_output_data_arr[0, time_pt] = -99999
+        # Next collect output for this trainval sample. Currently, net load forecast error at T+1
+        trainval_output_data_arr[0, time_pt] = raw_data_df.loc[time_pt + 1, net_load_forecast_error_col_name]
         
         # Finally, record all time pts present in this training sample for future reference/checks
         datetimes_for_trainval_data_arr[:, time_pt] = raw_data_df.loc[time_pt - num_of_lag_terms:time_pt + 1, datetime_col_name].values
