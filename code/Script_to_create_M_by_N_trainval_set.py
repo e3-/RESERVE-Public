@@ -10,7 +10,7 @@ raw_data_file_name = "input_for_M_by_N_creating_sript.csv"
 path_to_store_outputs_at = os.path.join(os.getcwd(), "outputs_from_code")
 trainval_inputs_data_file_name = "trainval_inputs.pkl"
 trainval_output_data_file_name = "trainval_output.pkl"
-datetimes_for_trainval_data_file_name = "trainval_datetimes.npy"
+datetimes_for_trainval_data_file_name = "trainval_datetimes.pkl"
 
 ## Constants
 num_of_lag_terms = 2 # Excluding T0. If = 2, implies T-1, T-2
@@ -45,7 +45,7 @@ hour_angle_col_name = "Hour_Angle"
 day_angle_col_name = "Day_Angle"
 days_from_start_date_col_name = "Days_from_Start_Date"
 net_load_forecast_error_col_name = "Net_Load_Forecast_Error"
-# Labels for all predictors. Order must match order in which these'll be populated in the MxN array
+# Labels for all predictors (Inputs to ML model). Order must match order in which these'll be populated in the MxN array
 labels_for_predictors = ["Load_Forecast_T-2", "Load_Forecast_T-1", "Load_Forecast_T0", "Load_Forecast_T+1", \
                          "Solar_Forecast_T-2", "Solar_Forecast_T-1", "Solar_Forecast_T0", "Solar_Forecast_T+1", \
                          "Wind_Forecast_T-2", "Wind_Forecast_T-1", "Wind_Forecast_T0", "Wind_Forecast_T+1", \
@@ -53,7 +53,11 @@ labels_for_predictors = ["Load_Forecast_T-2", "Load_Forecast_T-1", "Load_Forecas
                          "Solar_Forecast_Error_T-2", "Solar_Forecast_Error_T-1", \
                          "Wind_Forecast_Error_T-2", "Wind_Forecast_Error_T-1", \
                          "Solar_Hour_Angle_T+1", "Solar_Day_Angle_T+1", "Num_Days_from_Start_Date_T+1"]
+# Labels for response (output model is trained to predict)
 labels_for_response = ["Net_Load_Forecast_Error_T+1"]
+# Labels for datetimes corresponding to trainval samples. Neither predictors nor response. Just used to split dataset
+# into cross-val folds in a separate script downstream
+labels_for_datetimes = ["T-2", "T-1", "T0", "T+1"]
 
 
 ## Helper functions
@@ -130,7 +134,7 @@ trainval_inputs_data_arr[:] = np.nan
 trainval_output_data_arr = np.empty((1, num_of_time_points), dtype = float)
 trainval_output_data_arr[:] = np.nan
 # Datetimes are just stored for reference. Not part of the trainval inputs/outputs - atleast not at the moment
-datetimes_for_trainval_data_arr = np.empty((num_of_lag_terms + 2, num_of_time_points), dtype = object) # +2 because some values at T0 are predictors too and response is at T0 + 1 
+datetimes_for_trainval_data_arr = np.empty((num_of_lag_terms + 2, num_of_time_points), dtype = object) # +2 because some values at T0 are predictors too and response is at T0 + 1
 datetimes_for_trainval_data_arr[:] = np.nan
 
 ## Creating and saving trainval samples
@@ -188,19 +192,23 @@ for time_pt in range(num_of_lag_terms, num_of_time_points - 1):
     for prog_idx in range(1,5):
         if time_pt == int(0.25 * prog_idx * num_of_time_points):
             print("{}% there.......".format(25*prog_idx))
-        
+print(datetimes_for_trainval_data_arr)
 # Delete time-points that were invalid from the trainval array
 trainval_inputs_data_arr = trainval_inputs_data_arr[:,~np.all(np.isnan(trainval_inputs_data_arr), axis=0)]
 trainval_output_data_arr = trainval_output_data_arr[:,~np.all(np.isnan(trainval_output_data_arr), axis=0)]
+datetimes_for_trainval_data_arr = datetimes_for_trainval_data_arr[:,~np.all(pd.isnull(datetimes_for_trainval_data_arr), axis=0)]
 
 # Save trainval data with index to make clear what the entry in a given row is
 trainval_inputs_data_df = pd.DataFrame(trainval_inputs_data_arr, index = labels_for_predictors)
 trainval_output_data_df = pd.DataFrame(trainval_output_data_arr, index = labels_for_response)
+datetimes_for_trainval_data_df = pd.DataFrame(datetimes_for_trainval_data_arr, index = labels_for_datetimes)
+print(datetimes_for_trainval_data_df)
 
 # Save trainval samples
+print("Saving files......")
 trainval_inputs_data_df.to_pickle(os.path.join(path_to_store_outputs_at, trainval_inputs_data_file_name))
 trainval_output_data_df.to_pickle(os.path.join(path_to_store_outputs_at, trainval_output_data_file_name))
-np.save(os.path.join(path_to_store_outputs_at, datetimes_for_trainval_data_file_name), datetimes_for_trainval_data_arr)
+datetimes_for_trainval_data_df.to_pickle(os.path.join(path_to_store_outputs_at, datetimes_for_trainval_data_file_name))
 print("All done!")
 
 
