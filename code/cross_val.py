@@ -80,7 +80,7 @@ def create_val_masks_for_each_fold(day_block_shuffled_indices, num_of_cv_folds):
     num_samples = day_block_shuffled_indices.shape[0]
     indices = np.arange(num_samples)
     # Initialize containers to store masks determing the membership of the validation set 
-    val_masks_all_folds = np.zeros((num_cv_folds,num_samples),dtype = bool)
+    val_masks_all_folds = np.zeros((num_of_cv_folds,num_samples),dtype = bool)
     
     # iterate through every CV fold
     for cv_fold_index in range(num_of_cv_folds):
