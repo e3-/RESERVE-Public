@@ -1,4 +1,4 @@
 2017-2019
 15min ahead RTPD forecasts (OASIS)
-RTM 5 min actuals from Managing oversupply (averaged over 3 timesteps to get a value corresponding to each 15 min time-step)
+5 min ahead RTD forecasts (OASIS) for each of the three 5-min intervals in each of the 15 min RTPD intervals
 No manual cleaning conducted. Just passed it through the IPC data checker script which will likely be enhanced and improved upon later.
