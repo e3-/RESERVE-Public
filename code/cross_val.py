@@ -2,12 +2,10 @@ import os
 import pandas as pd
 import numpy as np
 
-## Constants
-time_step_used_to_determine_date_of_sample = "T+1" # "T+1" is the time associated with response variable
 
 ## Master function
 def get_CV_masks(trainval_datetimes, num_of_cv_folds = 10,
-                 path_to_shuffled_indices = 'outputs_from_code/day_block_shuffled_indices.npy'):
+                 path_to_shuffled_indices = 'day_block_shuffled_indices.npy'):
     """
     Gets training and validation input and output sets  for each of the cross-validation folds. Either
     reads them in from a pre-determined, user-defined location or creates (and optionally saves) them
@@ -48,8 +46,7 @@ def create_and_shuffle_day_blocks(trainval_datetimes, path_to_shuffled_indices):
     :return: day_block_shuffled_indices: np.array comprising of indices that shuffle days
     """
     # Extract dates from datetimes and identify unique dates
-    all_trainval_datetimes = pd.to_datetime(trainval_datetimes.loc[time_step_used_to_determine_date_of_sample, :])
-    all_trainval_dates = np.array(all_trainval_datetimes.dt.date.values)
+    all_trainval_dates = trainval_datetimes.date
     unique_trainval_dates = np.unique(all_trainval_dates)
     # Make a bucket for each unique date, fill it with sample indices belonging to that date
     list_of_unique_date_buckets = []
