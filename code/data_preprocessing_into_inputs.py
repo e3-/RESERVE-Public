@@ -1,6 +1,6 @@
-# TODO: Consider having option to disallow overlaps between subsequent training samples
+#==== TODO: Consider having option to disallow overlaps between subsequent training samples
 
-########## Change log v1.2 (11/07/2020) ##################
+#==== Change log v1.2 (11/07/2020) ====
 # Switched to autogeneration of column names in the M by N matrix based on lag and feature name
 # Transposed the M*N matrix in the output. Time is in index and different features are in column
 # Move datetime into the index of the input and output dataframe
@@ -8,7 +8,7 @@
 # Allow to not include a feature by inputting lag_term_start> lag_term_end
 # Streamline the lag term start and end list into a dictionary for further flexibility
 
-########## Change log v1.1 (11/01/2020) ##################
+#==== Change log v1.1 (11/01/2020) ====
 
 # Updated to better facilitate future changes in what M would be - both the broad types of predictors and # of lag
 # terms corresponding to each
@@ -18,14 +18,14 @@
 # Now, TRUE = Good, FALSE = Bad -> Based on change in data cleaning upstream
 # Some efficiency updates
 
-######### V1.0 originally created (10/22/2020) #################
+#====V1.0 originally created (10/22/2020) ====
 
 import os
 import numpy as np
 import pandas as pd
 import utility
 
-########## User inputs ##########
+#==== User inputs ====
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past... 
 # E.g. 1: start = -2, end = -1 implies only include values from 2 past time steps.
@@ -43,7 +43,8 @@ time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
 # Labels for response (output model is trained to predict)
 response_col_name = "Net_Load_Forecast_Error"
 
-########## Constants for use in script that DON'T need to be user defined ##########
+
+#==== Constants for use in script that DON'T need to be user defined ====
 # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility1
 dir_str = utility.Dir_Structure()
 
@@ -53,7 +54,7 @@ day_angle_col_name = "Day_Angle"
 days_from_start_date_col_name = "Days_from_Start_Date"
 
 
-########## Helper functions that don't need user intervention ##########
+#==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
 def calculate_response_variable(raw_data_df):
     """
@@ -171,7 +172,7 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
     return raw_data_df, raw_data_start_idx, raw_data_end_idx
 
 
-########## 1. Reading in raw data and validate/modify the data for downstream manipulation ##########
+#==== 1. Reading in raw data and validate/modify the data for downstream manipulation ====
 
 # Read in raw data to be used to create predictors and response variables
 raw_data_df = pd.read_csv(dir_str.raw_data_path, index_col=0, parse_dates=True, infer_datetime_format=True)
@@ -191,13 +192,13 @@ raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(raw_
 raw_data_start_date = raw_data_df.index[raw_data_start_idx]
 
 
-########## 2. Add in calendar terms for the raw data ##########
+#==== 2. Add in calendar terms for the raw data ====
 print("Calculating calendar-based predictors....")
 raw_data_df[hour_angle_col_name], raw_data_df[day_angle_col_name], raw_data_df[days_from_start_date_col_name] = \
     calculate_calendar_based_predictors(raw_data_df.index, longitude, time_difference_from_UTC, raw_data_start_date)
 
 
-########## 3. Add in netload forecast difference for the raw data ##########
+#==== 3. Add in netload forecast difference for the raw data ====
 print("Calculating response....")
 raw_data_df[response_col_name] = calculate_response_variable(raw_data_df)
 
@@ -208,7 +209,7 @@ lag_term_start_predictors = np.hstack(
 lag_term_end_predictors = np.hstack((lag_term_end_predictors, np.ones(num_feature_ext, dtype=int) * response_lead_term))
 
 
-########## 4. Using vectorized operations to construct lag terms ##########
+#==== 4. Using vectorized operations to construct lag terms ====
 print("Creating trainval samples for all time-points ....")
 # Initialize collectors to hold (and later save) trainval data in
 trainval_data_df = pd.DataFrame(None, index=raw_data_df.index[raw_data_start_idx:raw_data_end_idx])
@@ -228,7 +229,7 @@ for feature_idx, feature_type in enumerate(raw_data_df.columns):
                                    .iloc[raw_data_start_idx + time_step: raw_data_end_idx + time_step].values)
 
         
-########## 5. Drop invalid terms and store to hard drive ##########        
+#==== 5. Drop invalid terms and store to hard drive ====
 # Identify trainval samples wherein all lag term of features and responses are valid
 # If any entry is pd.NA, it is invalid
 print("{} of {} trainval samples are valid"
