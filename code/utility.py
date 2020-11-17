@@ -1,4 +1,5 @@
 import os
+import shutil
 
 class Dir_Structure:
     """Directory and file structure of the RESCUE model."""
@@ -30,8 +31,14 @@ class Dir_Structure:
         self.pred_trainval_path = os.path.join(self.output_dir,"pred_trainval.pkl")
         self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
         
+        # clear all contents in the log directory
+        shutil.rmtree(self.logs_dir)
+        
         # make these directories if they do not already exist
         self.make_directories()
+        
+
+        
 
     def make_directories(self):
         for folder in [self.data_dir, self.output_dir, self.logs_dir, self.ckpts_dir, self.models_dir, self.diag_dir]:
