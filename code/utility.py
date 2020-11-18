@@ -44,4 +44,4 @@ class Dir_Structure:
         for folder in [self.data_dir, self.raw_data_dir, self.output_dir,
                        self.logs_dir, self.ckpts_dir, self.models_dir, self.diag_dir]:
             if not os.path.exists(folder):
-                os.mkdir(folder)
+                os.makedirs(folder)
