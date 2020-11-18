@@ -26,8 +26,11 @@ import pandas as pd
 import utility
 
 # ==== User inputs ====
+# the name of the model version that this data would serve
+model_name = "rescue_v1_1_no_calendar"
+
 # Define the amount of lag terms that would end up in the input for each feature type
-# +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past... 
+# +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
 # E.g. 1: start = -2, end = -1 implies only include values from 2 past time steps.
 # E.g. 2: start = 0 , end = -1 implies do not include any terms for this feature.
 lag_term_start_predictors = np.array([-2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2])
@@ -39,18 +42,6 @@ response_lead_term = 1  # As a gentle reminder, its relative to present time, T0
 # that take place over time.
 longitude = -119.4179  # Roughly passing through the center of CA
 time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
-
-# Labels for response (output model is trained to predict)
-response_col_name = "Net_Load_Forecast_Error"
-
-# ==== Constants for use in script that DON'T need to be user defined ====
-# Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility1
-dir_str = utility.Dir_Structure()
-
-# The names of serveral calendar related terms
-hour_angle_col_name = "Hour_Angle"
-day_angle_col_name = "Day_Angle"
-days_from_start_date_col_name = "Days_from_Start_Date"
 
 
 # ==== Helper functions that don't need user intervention ====
@@ -171,8 +162,23 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
     return raw_data_df, raw_data_start_idx, raw_data_end_idx
 
 
-def main():
+def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predictors,
+         lag_term_end_predictors=lag_term_end_predictors,response_lead_term = response_lead_term,
+         longitude = longitude, time_difference_from_UTC = time_difference_from_UTC):
+
+    # ==== Constants for use in script that DON'T need to be user defined ====
+    # Labels for response (output model is trained to predict)
+    response_col_name = "Net_Load_Forecast_Error"
+    # The names of several calendar related terms
+    hour_angle_col_name = "Hour_Angle"
+    day_angle_col_name = "Day_Angle"
+    days_from_start_date_col_name = "Days_from_Start_Date"
+
+
     # ==== 1. Reading in raw data and validate/modify the data for downstream manipulation ====
+    # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
+    dir_str = utility.Dir_Structure(model_name=model_name)
+
     # Read in raw data to be used to create predictors and response variables
     raw_data_df = pd.read_csv(dir_str.raw_data_path, index_col=0, parse_dates=True, infer_datetime_format=True)
     raw_data_validity = pd.read_csv(dir_str.raw_data_validity_path, index_col=0, parse_dates=True,
