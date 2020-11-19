@@ -32,7 +32,8 @@ class Dir_Structure:
         self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
         
         # clear all contents in the log directory
-        shutil.rmtree(self.logs_dir)
+        if os.path.exists(self.logs_dir):
+            shutil.rmtree(self.logs_dir)
         
         # make these directories if they do not already exist
         self.make_directories()
