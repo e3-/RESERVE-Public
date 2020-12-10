@@ -9,6 +9,40 @@ E3_colors = np.array(E3_colors) / 255  # E3 color pallete
 
 
 # ==== Active diagnostics functions in use ====
+
+def n_crossings(pred_trainval):
+    """
+
+    Computes number of quantile crossings within CV folds for various target percentile pairs
+
+    Args:
+        pred_trainval: Dataframe containing quantile estimates for each CV fold and target percentile
+
+    Returns:
+        Dataframe containing number of quantile crossings for each pair of target percentiles within each CV fold
+            (only for valid pairs of "lower" and "upper" target percentiles)
+    """
+
+    columns = pred_trainval.columns # Get columns
+    tau_arr = np.sort(np.unique(np.array([c[0] for c in columns])))  # Tau values need to be sorted
+    CV_arr = np.sort(np.unique(np.array([c[1] for c in columns])))
+
+    crossings = {} # Define dictionary to store crossings
+
+    for CV in CV_arr:
+        # Look for quantile crossings only in sets of predictions from models trained on same CV fold
+        crossings[CV] = {}
+        for i, t1 in enumerate(tau_arr):
+            for j, t2 in enumerate(tau_arr):
+                if t1 < t2: # Only evaluate number of quantile crossings on valid lower/upper target percentile pairs
+                    crossings[CV][(t1, t2)] = sum(
+                        pred_trainval[t1, CV] > pred_trainval[t2, CV])  # Record number of quantile crossings
+
+    df = pd.DataFrame(crossings)
+    df.columns.name = 'CV Fold ID'
+    df.index.rename(['Lower Quantile', 'Upper Quantile'], inplace=True)
+    return df
+
 def get_color_gradient(colors, num_gradient):
     """
     Generate color gradient base on the base colors and the number of gradient you need. Essentially,
