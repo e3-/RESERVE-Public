@@ -23,14 +23,15 @@ def get_color_gradient(colors, num_gradient):
     return color_gradient
 
 
-def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, input_var_name):
+def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, input_var_name, response_label):
     """
     Plot the bias (bottom panel) and uncertainty (top panel )grouped by a certain input feature.
     The input feature must take discreet value for the groupedby function to work properly
     :param pred_trainval: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
     of different forecast quantiles
     :param input_var_discretized: The input features used for grouping. Must be discrete values.
-    :param input_var_name: name of the input variable for use in labeling
+    :param input_var_name: str, name of the input variable for use in labeling
+    :param response_label: str ,name of the output variable for use in labeling
     :return fig, axarr: matplotlib Fig and axes array that contained the finished plots
     """
 
@@ -80,7 +81,7 @@ def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, inp
     # labels, legends, tiles
     axarr[0].legend(frameon=False, loc='center left', bbox_to_anchor=[1, 0.5])
     axarr[0].set_ylabel('Reserves (MW)')
-    axarr[0].set_title('Forecast uncertainty v.s. ' + input_var_name)
+    axarr[0].set_title(response_label + ' Forecast Uncertainty v.s. ' + input_var_name)
     axarr[-1].set_xlabel(input_var_name)
 
     fig.set_size_inches(8, 6)  # resetting figure size
@@ -193,12 +194,13 @@ def plot_compare_train_val(training_hist, PI_percentiles, metrics_to_idx_map, me
     return fig, axarr
 
 
-def plot_example_ts(ts_ranges, pred_trainval, output_trainval):
+def plot_example_ts(ts_ranges, pred_trainval, output_trainval, response_label):
     """
     Visualize the example periods of time, with the true errors and different quantile forecasts.
     :param ts_ranges: A list of periods to plot. Each element must be valid index for a pd.datetimeindex.
     :param pred_trainval: pd dataframe of (num_samples, num_PIs). A record of quantile forecast for all training samples
     :param output_trainval: pd dataframe of (num_samples, 1). True forecast errors for all training samples
+    :response_label: str, name of the output variable for use in labeling
     :return fig, axarr: Finished plots of the example timeseries. Different periods are in its own panel.
     """
     fig, axarr = plt.subplots(len(ts_ranges), 1, sharey=True)
@@ -212,7 +214,7 @@ def plot_example_ts(ts_ranges, pred_trainval, output_trainval):
     for i, ts_range in enumerate(ts_ranges):
 
         # plot true response and median forecast
-        axarr[i].plot(output_trainval.loc[ts_range], color=E3_colors[1], label='True forecast error')
+        axarr[i].plot(output_trainval.loc[ts_range], color=E3_colors[1], label='True Forecast Error')
         axarr[i].plot(pred_trainval.loc[ts_range, 0.5], color=E3_colors[0], dashes=[2, 2], label='Median bias - 50%')
 
         # cycle through each target quantile pair
@@ -224,7 +226,7 @@ def plot_example_ts(ts_ranges, pred_trainval, output_trainval):
 
         # Mark the date of this series.
         axarr[i].text(0.05, 0.85, pd.Timestamp(ts_range).strftime('%x'), transform=axarr[i].transAxes)
-        axarr[i].set_ylabel("Net load forecast error (MW)")
+        axarr[i].set_ylabel(response_label + " Forecast Error (MW)")
         axarr[i].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         axarr[i].legend(loc='center left', bbox_to_anchor=[1, 0.5], frameon=False)
 
