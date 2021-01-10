@@ -27,7 +27,7 @@ import utility
 
 # ==== User inputs ====
 # the name of the model version that this data would serve
-model_name = "rescue_v1_1_no_calendar"
+model_name = "rescue_v1_2"
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
