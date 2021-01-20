@@ -1,5 +1,9 @@
 # ==== TODO: Consider having option to disallow overlaps between subsequent training samples
-# TODO: Add change log
+# ==== Change log v1.3 (1/13/2021) ====
+# Enabled script' ability to support both single and multi-objective learning
+# if the multi_obj_learning_flag is set to True, response variables will be net load, load, solar and wind forecast
+# errors in that order. Else, the sole response variable will be the net load forecast error
+
 # ==== Change log v1.2 (11/07/2020) ====
 # Switched to autogeneration of column names in the M by N matrix based on lag and feature name
 # Transposed the M*N matrix in the output. Time is in index and different features are in column
@@ -85,8 +89,6 @@ def calculate_response_variables(raw_data_df, response_col_names):
 
     # The response variable(s) below have been added for multi-objective learning
     if len(response_col_names) > 1:
-        #TODO : Ensure you leave a note to ensure user expects response variables to be calculted in the order it is here
-        #TODO: Or think if there's a better way to do this
         response_values_df.iloc[:, 1] = load_forecast_error
         response_values_df.iloc[:, 2] = solar_forecast_error
         response_values_df.iloc[:, 3] = wind_forecast_error
@@ -94,7 +96,7 @@ def calculate_response_variables(raw_data_df, response_col_names):
     return response_values_df
 
 
-def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date=None):
+def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date = None):
     """
     Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
     day angle and # of days passed since a start-date which can either be a user input or the first day in the trainval
@@ -187,8 +189,8 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # ==== Constants for use in script that DON'T need to be user defined ====
     # Labels for response (output(s) model is trained to predict)
     if multi_obj_learning_flag:
-        # NOTE: You can change these labels, but the order MUST be net load->load->solar->wind.
-        # To change order, you will need to change the function calculating response
+        # You can change these labels, but the order MUST be net load->load->solar->wind
+        # To change order or add/remove any response variables, you will need to change the func calculate_response_variables too
         response_col_names = ["Net_Load_Forecast_Error", "Load_Forecast_Error", "Solar_Forecast_Error",
                               "Wind_Forecast_Error"]
     else:
