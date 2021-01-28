@@ -15,7 +15,8 @@ def coverage(y_true, y_pred):
         Fraction of observed forecast errors that fall below / are "covered" by quantile estimates
 
     '''
-    return np.mean(y_true <= y_pred)
+    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+    return np.mean(y_true[mask] <= y_pred[mask])
 
 def requirement(y_true, y_pred):
     '''
@@ -28,21 +29,8 @@ def requirement(y_true, y_pred):
         Average reserve level/requirement, which corresponds to the average of the quantile estimates
 
     '''
-    return np.mean(y_pred)
-
-def exceeding(y_true, y_pred):
-    '''
-
-    Args:
-        y_true: Time series of observed forecast errors
-        y_pred: Time series of corresponding conditional quantile estimates from machine learning model
-
-    Returns:
-        Average excess of observed forecast errors above the quantile estimates when observed forecast errors exceed
-            corresponding quantile estimates
-
-    '''
-    return np.mean((y_true - y_pred)[y_true > y_pred])
+    mask = ~(np.isnan(y_pred))
+    return np.mean(y_pred[mask])
 
 def closeness(y_true, y_pred):
     '''
@@ -56,9 +44,10 @@ def closeness(y_true, y_pred):
             error (MAE) between observed forecast errors and quantile estimates
 
     '''
-    return np.mean(np.abs(y_true - y_pred))
+    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+    return np.mean(np.abs(y_true[mask] - y_pred[mask]))
 
-def max_exceeding(y_true, y_pred):
+def exceedance(y_true, y_pred, tau = 0.975):
     '''
 
     Args:
@@ -66,12 +55,17 @@ def max_exceeding(y_true, y_pred):
         y_pred: Time series of corresponding conditional quantile estimates from machine learning model
 
     Returns:
-        Maximum excess of observed forecast errors above corresponding quantile estimates
+        Average excess of observed forecast errors above (or below) the quantile estimates when observed forecast errors
+        exceed corresponding quantile estimates
 
     '''
-    return np.max(y_true - y_pred)
+    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+    if tau >= 0.5:
+        return np.mean((y_true[mask] - y_pred[mask])[y_true[mask] > y_pred[mask]])
+    else:
+        return np.mean((y_true[mask] - y_pred[mask])[y_true[mask] < y_pred[mask]])
 
-def reserve_ramp_rate(y_true, y_pred):
+def max_exceedance(y_true, y_pred, tau = 0.975):
     '''
 
     Args:
@@ -79,10 +73,14 @@ def reserve_ramp_rate(y_true, y_pred):
         y_pred: Time series of corresponding conditional quantile estimates from machine learning model
 
     Returns:
-        Average ramp rate of reserve level/requirement (average absolute rate of change)
+        Maximum excess of observed forecast errors above (or below) corresponding quantile estimates
 
     '''
-    return np.mean(np.abs(y_pred.values[1:] - y_pred.values[:-1])/((y_pred.index[1:] - y_pred.index[:-1]).astype(int)/(1e9*3600)))
+    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+    if tau >= 0.5:
+        return np.max(y_true[mask] - y_pred[mask])
+    else:
+        return np.min(y_true[mask] - y_pred[mask])
 
 def pinball_risk(y_true, y_pred, tau = 0.975):
     '''
@@ -97,7 +95,25 @@ def pinball_risk(y_true, y_pred, tau = 0.975):
             metric is minimized for "optimal" or "true" quantile estimation models
 
     '''
+    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+    y_true, y_pred = y_true[mask], y_pred[mask]
     return np.mean(np.max(np.array([(1-tau)*(y_pred - y_true), tau*(y_true - y_pred)]), axis = 0))
+
+def reserve_ramp_rate(y_true, y_pred):
+    '''
+
+    Args:
+        y_true: Time series of observed forecast errors
+        y_pred: Time series of corresponding conditional quantile estimates from machine learning model
+
+    Returns:
+        Average ramp rate of reserve level/requirement (average absolute rate of change)
+
+    '''
+    mask = ~(np.isnan(y_pred))
+    y_pred = y_pred[mask]
+    return np.mean(np.abs(y_pred.values[1:] - y_pred.values[:-1])/((y_pred.index[1:] - y_pred.index[:-1]).astype(int)/(1e9*3600)))
+
 
 # Define function to compute/writeout metrics
 
@@ -108,9 +124,9 @@ def compute_metrics(output_trainval,
                     filename=None,
                     metrics=[coverage,
                              requirement,
-                             exceeding,
                              closeness,
-                             max_exceeding,
+                             exceedance,
+                             max_exceedance,
                              reserve_ramp_rate,
                              pinball_risk]
                     ):
@@ -146,7 +162,9 @@ def compute_metrics(output_trainval,
 
     '''
 
-    pinball_risk.__defaults__ = (tau,)  # Set pinball risk default tau-level to input tau (default will remain tau = 0.975 if no value is specified)
+    exceedance.__defaults__ = (tau,) # Set exceedance default tau-level to input tau
+    max_exceedance.__defaults__ = (tau,) # Set max_exceedance default tau-level to input tau
+    pinball_risk.__defaults__ = (tau,)  # Set pinball_risk default tau-level to input tau
     CV_folds = np.arange(10)  # Define array of CV fold IDs
 
     if df is None:
@@ -180,14 +198,14 @@ if __name__ == "__main__":
     print('Coverage: {}%'.format(100*CAISO_data['Coverage']['Histogram']))
     print('Requirement: {} MW'.format(CAISO_data['Requirement']['Histogram']))
     print('Closeness: {} MW'.format(CAISO_data['Closeness']['Histogram']))
-    print('Exceeding: {} MW'.format(CAISO_data['Exceeding']['Histogram']))
+    print('Exceedance: {} MW'.format(CAISO_data['Exceeding']['Histogram']))
 
     print('\nMeasurements reported by CAISO for Quantile Regression method:\n')
 
     print('Coverage: {}%'.format(100*CAISO_data['Coverage']['Quantile Regression']))
     print('Requirement: {} MW'.format(CAISO_data['Requirement']['Quantile Regression']))
     print('Closeness: {} MW'.format(CAISO_data['Closeness']['Quantile Regression']))
-    print('Exceeding: {} MW'.format(CAISO_data['Exceeding']['Quantile Regression']))
+    print('Exceedance: {} MW'.format(CAISO_data['Exceeding']['Quantile Regression']))
 
     print('\nRESCUE performance metrics:\n')
 
@@ -199,8 +217,8 @@ if __name__ == "__main__":
     print('Coverage: {:.2f}%'.format(100 * df.loc['coverage'].mean()))
     print('Requirement: {:.2f} MW'.format(df.loc['requirement'].mean()))
     print('Closeness: {:.2f} MW'.format(df.loc['closeness'].mean()))
-    print('Exceeding: {:.2f} MW'.format(df.loc['exceeding'].mean()))
-    print('Max. Exceeding: {:.2f} MW'.format(df.loc['max_exceeding'].mean()))
+    print('exceedance: {:.2f} MW'.format(df.loc['exceedance'].mean()))
+    print('Max. exceedance: {:.2f} MW'.format(df.loc['max_exceedance'].mean()))
     print('Mean Reserve Ramp Rate: {:.2f} MW/hr'.format(df.loc['reserve_ramp_rate'].mean()))
     print('Pinball Risk: {:.2f} MW'.format(df.loc['pinball_risk'].mean()))
 
