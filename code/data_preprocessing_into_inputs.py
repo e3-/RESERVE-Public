@@ -85,13 +85,13 @@ def calculate_response_variables(raw_data_df, response_col_names):
     net_load_forecast_error = load_forecast_error - solar_forecast_error - wind_forecast_error
 
     # Net load forecast error will be the sole response in single objective learning
-    response_values_df.iloc[:, 0] = net_load_forecast_error
+    response_values_df.loc[:, "Net_Load_Forecast_Error"] = net_load_forecast_error
 
     # The response variable(s) below have been added for multi-objective learning
     if len(response_col_names) > 1:
-        response_values_df.iloc[:, 1] = load_forecast_error
-        response_values_df.iloc[:, 2] = solar_forecast_error
-        response_values_df.iloc[:, 3] = wind_forecast_error
+        response_values_df.loc[:, "Load_Forecast_Error"] = load_forecast_error
+        response_values_df.loc[:, "Solar_Forecast_Error"] = solar_forecast_error
+        response_values_df.loc[:, "Wind_Forecast_Error"] = wind_forecast_error
 
     return response_values_df
 
@@ -190,12 +190,12 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # Labels for response (output(s) model is trained to predict)
     if multi_obj_learning_flag:
         # You can change these labels, but the order MUST be net load->load->solar->wind
-        # To change order or add/remove any response variables, you will need to change the func calculate_response_variables too
+        # To change order or add/remove any response variables, you will need to change the function
+        # calculate_response_variables too
         response_col_names = ["Net_Load_Forecast_Error", "Load_Forecast_Error", "Solar_Forecast_Error",
                               "Wind_Forecast_Error"]
     else:
         response_col_names = ["Net_Load_Forecast_Error"]
-    num_response_cols = len(response_col_names)
 
     # The names of several calendar related terms
     hour_angle_col_name = "Hour_Angle"
@@ -273,7 +273,7 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     trainval_data_df = trainval_data_df.dropna()
 
     # Separate predictors (model inputs) from response (model output(s))
-    trainval_outputs_df = trainval_data_df.iloc[:, (-1) * num_response_cols:].copy()
+    trainval_outputs_df = trainval_data_df.loc[:, response_col_names].copy()
     trainval_data_df = trainval_data_df.drop(columns = trainval_outputs_df.columns)
 
     # Save trainval samples
