@@ -254,6 +254,7 @@ def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, inp
     axarr[1].set_ylabel('Quantile of Forecast Err (MW)')
     axarr[1].legend(frameon=False, loc='center left', bbox_to_anchor=[1, 0.5])
 
+    # TODO: Need to get rid of this section. We never show the top panel
     # Top panel: uncertainty. Cycle through model prediction at all target quantiles
     # TODO: Need to reverse reserve directions for load and net-load plotting
     for i, PI in enumerate(pred_trainval_groupedby_input.columns):
