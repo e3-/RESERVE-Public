@@ -1,6 +1,30 @@
 import numpy as np
 import pandas as pd
 import os
+import pathlib
+
+# Define helper function to get validation set predictions from cross-validation fold masks
+def get_validation_preds(pred_trainval, tau, output, val_masks):
+    '''
+    Stitch together validation set predictions from multi-objective pred_trainval predictions dataframe
+
+    Args:
+        pred_trainval (Pandas DataFrame): predictions dataframe from multi-objective RESCUE model
+        tau (float): target quantile (between 0 and 1)
+        output (str): dataframe column name for prediction output/target objective (e.g. net load, load, solar, wind)
+        val_masks (array): numpy array containing validation set mask for each cross-validation fold in its rows
+
+    Returns:
+        preds (Pandas Series): Validation set predictions for given tau, target from all CV folds stitched together along a single axis
+    '''
+
+    preds = np.zeros(len(pred_trainval))
+    for j, CV in enumerate(pred_trainval.columns.levels[1]):
+        val_mask = val_masks[j, :]  # Get validation mask
+        preds += pred_trainval[(tau, CV, output)] * val_mask
+    preds = pd.Series(data=preds, index=df.index)
+
+    return preds
 
 # Define metrics
 
@@ -82,7 +106,7 @@ def max_exceedance(y_true, y_pred, tau = 0.975):
     else:
         return np.min(y_true[mask] - y_pred[mask])
 
-def pinball_risk(y_true, y_pred, tau = 0.975):
+def pinball_loss(y_true, y_pred, tau = 0.975):
     '''
 
     Args:
@@ -118,11 +142,11 @@ def reserve_ramp_rate(y_true, y_pred):
 # Define function to compute/writeout metrics
 
 def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, tau=0.975,
-                                      filename=None, metrics=[coverage,
+                                      filename=None, val_masks=None, metrics=[coverage,
                                                               requirement,
-                                                              exceeding,
+                                                              exceedance,
                                                               closeness,
-                                                              max_exceeding,
+                                                              max_exceedance,
                                                               reserve_ramp_rate,
                                                               pinball_loss]):
     """
@@ -137,6 +161,7 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
         df: Existing dataframe containing metrics (e.g. for another tau-level); default = None
         tau: Target percentile for predictions (also an input for pinball loss metric); default = 0.975
         filename: Path to file where metrics will be saved if filename specified; default = None
+        val_masks: Array containing cross-validation fold validation set masks in rows
         metrics: List of metrics to compute for input data
 
     Returns:
@@ -156,27 +181,37 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
 
     """
 
-
     exceedance.__defaults__ = (tau,) # Set exceedance default tau-level to input tau
     max_exceedance.__defaults__ = (tau,) # Set max_exceedance default tau-level to input tau
     pinball_loss.__defaults__ = (tau,)  # Set pinball_risk default tau-level to input tau
-    CV_folds = np.arange(10)  # Define array of CV fold IDs
 
+    CV_folds = pred_trainval.columns.levels[1]  # Define array of CV fold IDs
+    outputs = pred_trainval.columns.levels[2] # Define array of target outputs (load, net load, solar, wind)
+
+    # Initialize dataframe if not passed to function in arguments
     if df is None:
         df = pd.DataFrame()  # Create new dataframe if no existing dataframe is given
         df['metrics'] = [metric.__name__ for metric in metrics]
         df.set_index('metrics', inplace=True)  # Set index to list of metrics
         df.index.name = None
 
-    y_true = output_trainval  # Define y_true
     for j, CV in enumerate(CV_folds):
-        y_pred = pred_trainval[(tau, CV)]  # Define y_pred (from tau, CV fold ID)
-        df[(tau, CV)] = ""  # Create empty column to hold metrics
-        for metric in metrics:
-            df[(tau, CV)][metric.__name__] = metric(y_true, y_pred)  # Compute metric
+
+        # Get validation mask for CV fold (if provided)
+        if val_masks is not None:
+            val_mask = val_masks[j, :]
+        else:
+            val_mask = np.ones(len(pred_trainval))
+
+        for output in outputs:
+            y_true = output_trainval[output].loc[val_mask == 1]  # Define y_true (validation set)
+            y_pred = pred_trainval[(tau, CV, output)].loc[val_mask == 1]  # Define y_pred (validation set)
+            df[(tau, CV, output)] = ""  # Create empty column to hold metrics
+            for metric in metrics:
+                df[(tau, CV, output)][metric.__name__] = metric(y_true, y_pred)  # Compute metric
 
     df = df.T.set_index(
-        pd.MultiIndex.from_tuples(df.T.index, names=('Quantiles', 'Fold ID'))).T  # Reformat to have multi-level columns
+        pd.MultiIndex.from_tuples(df.T.index, names=('Quantiles', 'Fold ID', 'Output_Name'))).T  # Reformat to have multi-level columns
 
     if filename is not None:
         df.to_csv(filename)  # Write to CSV file
@@ -184,7 +219,7 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
     return df
 
 
-def compute_metrics_for_all_taus(output_trainval, pred_trainval, avg_across_folds=True):
+def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = None, avg_across_folds=True):
     """
     :param output_trainval:Dataframe of observed forecast errors
     :param pred_trainval: Dataframe of corresponding conditional quantile estimates from machine learning model for
@@ -197,7 +232,7 @@ def compute_metrics_for_all_taus(output_trainval, pred_trainval, avg_across_fold
 
     for tau in pred_trainval.columns.levels[0]:
         metrics_value_df = compute_metrics_for_specified_tau(output_trainval, pred_trainval,
-                                                             df=metrics_value_df, tau=tau)
+                                                             df=metrics_value_df, tau=tau, val_masks = val_masks)
 
     if avg_across_folds:
         metrics_value_df = metrics_value_df.astype('float').mean(axis=1, level=0)
@@ -205,7 +240,7 @@ def compute_metrics_for_all_taus(output_trainval, pred_trainval, avg_across_fold
     return metrics_value_df
 
 
-def n_crossings(pred_trainval):
+def n_crossings(pred_trainval, filename = None):
     """
 
     Computes number of quantile crossings within CV folds for various target percentile pairs
@@ -218,11 +253,26 @@ def n_crossings(pred_trainval):
             (only for valid pairs of "lower" and "upper" target percentiles)
     """
 
-    columns = pred_trainval.columns # Get columns
-    tau_arr = np.sort(np.unique(np.array([c[0] for c in columns])))  # Tau values need to be sorted
-    CV_arr = np.sort(np.unique(np.array([c[1] for c in columns])))
+    tau_arr = pred_trainval.columns.levels[0] # Define array of tau (target quantiles)
+    CV_folds = pred_trainval.columns.levels[1]  # Define array of CV fold IDs
+    outputs = pred_trainval.columns.levels[2] # Define array of target outputs (load, net load, solar, wind)
 
-    crossings = {} # Define dictionary to store crossings
+    crossings = {}  # Define dictionary to store crossings
+
+    for CV in CV_folds:
+        for output in outputs:
+            # Look for quantile crossings only in sets of predictions from models trained on same CV fold and predicting same target output
+            crossings[(CV, output)] = {}
+            for i, t1 in enumerate(tau_arr):
+                for j, t2 in enumerate(tau_arr):
+                    if t1 < t2:  # Only evaluate number of quantile crossings on valid lower/upper target percentile pairs
+                        crossings[(CV, output)][(t1, t2)] = sum(
+                            pred_trainval[(t1, CV, output)] > pred_trainval[(t2, CV, output)])  # Record number of quantile crossings
+
+    df = pd.DataFrame(crossings)
+    df.columns.names = ('CV Fold ID', 'Output_Name')
+    df.index.rename(['Lower Quantile', 'Upper Quantile'], inplace=True)
+
     if filename != None:
         df.to_csv(filename)  # Writeout to CSV file
 
@@ -231,63 +281,23 @@ def n_crossings(pred_trainval):
 
 if __name__ == "__main__":
 
-    CAISO_data = pd.read_csv(os.path.join('CAISO Metrics', 'CAISO_measurements.csv'), index_col='Unnamed: 0')
+    import cross_val
+    import utility
 
-    print('Measurements reported by CAISO for Histogram method:\n')
+    model_name = 'rescue_v1_1_multi_objective'
+    num_cv_folds = 10
 
-    print('Coverage: {}%'.format(100 * CAISO_data['Coverage']['Histogram']))
-    print('Requirement: {} MW'.format(CAISO_data['Requirement']['Histogram']))
-    print('Closeness: {} MW'.format(CAISO_data['Closeness']['Histogram']))
-    print('Exceeding: {} MW'.format(CAISO_data['Exceeding']['Histogram']))
+    dir_str = utility.Dir_Structure(model_name=model_name)
+    input_trainval = pd.read_pickle(dir_str.input_trainval_path)
+    output_trainval = pd.read_pickle(dir_str.output_trainval_path)
+    val_masks_all_folds = cross_val.get_CV_masks(input_trainval.index, num_cv_folds, dir_str.shuffled_indices_path)
 
-    print('\nMeasurements reported by CAISO for Quantile Regression method:\n')
+    curr_dir = pathlib.Path('.')
+    preds = curr_dir / '..' / 'output' / model_name / 'pred_trainval.pkl'
+    pred_trainval = pd.read_pickle(preds)
 
-    print('Coverage: {}%'.format(100 * CAISO_data['Coverage']['Quantile Regression']))
-    print('Requirement: {} MW'.format(CAISO_data['Requirement']['Quantile Regression']))
-    print('Closeness: {} MW'.format(CAISO_data['Closeness']['Quantile Regression']))
-    print('Exceeding: {} MW'.format(CAISO_data['Exceeding']['Quantile Regression']))
+    print('Metrics:')
+    print(compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks=val_masks_all_folds))
 
-    print('\nRESCUE performance metrics:\n')
-
-    output_trainval = pd.read_pickle(
-        'C:\\Users\\charles.gulian\\PycharmProjects\\RESCUE\\data\\rescue_v1_2\\output_trainval.pkl')
-    pred_trainval1 = pd.read_pickle(
-        'C:\\Users\\charles.gulian\\PycharmProjects\\RESCUE\\output\\rescue_v1_1\\pred_trainval.pkl')
-
-    df = compute_metrics_for_specified_tau(output_trainval, pred_trainval1)
-    print('Coverage: {}%'.format(100*CAISO_data['Coverage']['Histogram']))
-    print('Requirement: {} MW'.format(CAISO_data['Requirement']['Histogram']))
-    print('Closeness: {} MW'.format(CAISO_data['Closeness']['Histogram']))
-    print('Exceedance: {} MW'.format(CAISO_data['Exceeding']['Histogram']))
-
-    print('\nMeasurements reported by CAISO for Quantile Regression method:\n')
-
-    print('Coverage: {}%'.format(100*CAISO_data['Coverage']['Quantile Regression']))
-    print('Requirement: {} MW'.format(CAISO_data['Requirement']['Quantile Regression']))
-    print('Closeness: {} MW'.format(CAISO_data['Closeness']['Quantile Regression']))
-    print('Exceedance: {} MW'.format(CAISO_data['Exceeding']['Quantile Regression']))
-
-    print('\nRESCUE performance metrics:\n')
-
-    output_trainval = pd.read_pickle('C:\\Users\\charles.gulian\\PycharmProjects\\RESCUE\\data\\rescue_v1_2\\output_trainval.pkl')
-    pred_trainval1 = pd.read_pickle('C:\\Users\\charles.gulian\\PycharmProjects\\RESCUE\\output\\rescue_v1_1\\pred_trainval.pkl')
-
-    df = compute_metrics(output_trainval, pred_trainval1)
-
-    print('Coverage: {:.2f}%'.format(100 * df.loc['coverage'].mean()))
-    print('Requirement: {:.2f} MW'.format(df.loc['requirement'].mean()))
-    print('Closeness: {:.2f} MW'.format(df.loc['closeness'].mean()))
-    print('exceedance: {:.2f} MW'.format(df.loc['exceedance'].mean()))
-    print('Max. exceedance: {:.2f} MW'.format(df.loc['max_exceedance'].mean()))
-    print('Mean Reserve Ramp Rate: {:.2f} MW/hr'.format(df.loc['reserve_ramp_rate'].mean()))
-    print('Pinball Risk: {:.2f} MW'.format(df.loc['pinball_risk'].mean()))
-
-    print('\nMetrics dataframe:\n')
-    print(df)
-    print('Exceeding: {:.2f} MW'.format(df.loc['exceeding'].mean()))
-    print('Max. Exceeding: {:.2f} MW'.format(df.loc['max_exceeding'].mean()))
-    print('Mean Reserve Ramp Rate: {:.2f} MW/hr'.format(df.loc['reserve_ramp_rate'].mean()))
-    print('Pinball Risk: {:.2f} MW'.format(df.loc['pinball_loss'].mean()))
-
-    print('\nMetrics dataframe:\n')
-    print(df)
+    print('# Quantile Crossings:')
+    print(n_crossings(pred_trainval))
