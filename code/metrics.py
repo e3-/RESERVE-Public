@@ -28,7 +28,7 @@ def get_validation_preds(pred_trainval, tau, output, val_masks):
 
 # Define metrics
 
-def coverage(y_true, y_pred):
+def coverage(y_true, y_pred, **kwargs):
     '''
 
     Args:
@@ -42,7 +42,7 @@ def coverage(y_true, y_pred):
     mask = ~(np.isnan(y_true) | np.isnan(y_pred))
     return np.mean(y_true[mask] <= y_pred[mask])
 
-def requirement(y_true, y_pred):
+def requirement(y_true, y_pred, **kwargs):
     '''
 
     Args:
@@ -56,7 +56,7 @@ def requirement(y_true, y_pred):
     mask = ~(np.isnan(y_pred))
     return np.mean(y_pred[mask])
 
-def closeness(y_true, y_pred):
+def closeness(y_true, y_pred, **kwargs):
     '''
 
     Args:
@@ -71,7 +71,7 @@ def closeness(y_true, y_pred):
     mask = ~(np.isnan(y_true) | np.isnan(y_pred))
     return np.mean(np.abs(y_true[mask] - y_pred[mask]))
 
-def exceedance(y_true, y_pred, tau = 0.975):
+def exceedance(y_true, y_pred, tau = 0.975, **kwargs):
     '''
 
     Args:
@@ -89,7 +89,7 @@ def exceedance(y_true, y_pred, tau = 0.975):
     else:
         return np.mean((y_true[mask] - y_pred[mask])[y_true[mask] < y_pred[mask]])
 
-def max_exceedance(y_true, y_pred, tau = 0.975):
+def max_exceedance(y_true, y_pred, tau = 0.975, **kwargs):
     '''
 
     Args:
@@ -106,7 +106,7 @@ def max_exceedance(y_true, y_pred, tau = 0.975):
     else:
         return np.min(y_true[mask] - y_pred[mask])
 
-def pinball_loss(y_true, y_pred, tau = 0.975):
+def pinball_loss(y_true, y_pred, tau = 0.975, **kwargs):
     '''
 
     Args:
@@ -123,7 +123,7 @@ def pinball_loss(y_true, y_pred, tau = 0.975):
     y_true, y_pred = y_true[mask], y_pred[mask]
     return np.mean(np.max(np.array([(1-tau)*(y_pred - y_true), tau*(y_true - y_pred)]), axis = 0))
 
-def reserve_ramp_rate(y_true, y_pred):
+def reserve_ramp_rate(y_true, y_pred, **kwargs):
     '''
 
     Args:
@@ -142,13 +142,13 @@ def reserve_ramp_rate(y_true, y_pred):
 # Define function to compute/writeout metrics
 
 def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, tau=0.975,
-                                      filename=None, val_masks=None, metrics=[coverage,
+                                      filename=None, val_masks=None, metrics=(coverage,
                                                               requirement,
                                                               exceedance,
                                                               closeness,
                                                               max_exceedance,
                                                               reserve_ramp_rate,
-                                                              pinball_loss]):
+                                                              pinball_loss)):
     """
 
     Description:
@@ -181,10 +181,6 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
 
     """
 
-    exceedance.__defaults__ = (tau,) # Set exceedance default tau-level to input tau
-    max_exceedance.__defaults__ = (tau,) # Set max_exceedance default tau-level to input tau
-    pinball_loss.__defaults__ = (tau,)  # Set pinball_risk default tau-level to input tau
-
     CV_folds = pred_trainval.columns.levels[1]  # Define array of CV fold IDs
     outputs = pred_trainval.columns.levels[2] # Define array of target outputs (load, net load, solar, wind)
 
@@ -194,7 +190,8 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
         df['metrics'] = [metric.__name__ for metric in metrics]
         df.set_index('metrics', inplace=True)  # Set index to list of metrics
         df.index.name = None
-
+    
+    # cycle through each of the CV fold to calculate metric
     for j, CV in enumerate(CV_folds):
 
         # Get validation mask for CV fold (if provided)
@@ -208,7 +205,7 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
             y_pred = pred_trainval[(tau, CV, output)].loc[val_mask == 1]  # Define y_pred (validation set)
             df[(tau, CV, output)] = ""  # Create empty column to hold metrics
             for metric in metrics:
-                df[(tau, CV, output)][metric.__name__] = metric(y_true, y_pred)  # Compute metric
+                df[(tau, CV, output)][metric.__name__] = metric(y_true, y_pred, tau = tau)  # Compute metric
 
     df = df.T.set_index(
         pd.MultiIndex.from_tuples(df.T.index, names=('Quantiles', 'Fold ID', 'Output_Name'))).T  # Reformat to have multi-level columns
