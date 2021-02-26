@@ -39,8 +39,7 @@ def coverage(y_true, y_pred, **kwargs):
         Fraction of observed forecast errors that fall below / are "covered" by quantile estimates
 
     '''
-    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
-    return np.mean(y_true[mask] <= y_pred[mask])
+    return (y_true <= y_pred).mean()
 
 def requirement(y_true, y_pred, **kwargs):
     '''
@@ -53,8 +52,7 @@ def requirement(y_true, y_pred, **kwargs):
         Average reserve level/requirement, which corresponds to the average of the quantile estimates
 
     '''
-    mask = ~(np.isnan(y_pred))
-    return np.mean(y_pred[mask])
+    return y_pred.mean()
 
 def closeness(y_true, y_pred, **kwargs):
     '''
@@ -68,8 +66,7 @@ def closeness(y_true, y_pred, **kwargs):
             error (MAE) between observed forecast errors and quantile estimates
 
     '''
-    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
-    return np.mean(np.abs(y_true[mask] - y_pred[mask]))
+    return (y_true - y_pred).abs().mean()
 
 def exceedance(y_true, y_pred, tau = 0.975, **kwargs):
     '''
@@ -83,11 +80,11 @@ def exceedance(y_true, y_pred, tau = 0.975, **kwargs):
         exceed corresponding quantile estimates
 
     '''
-    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+
     if tau >= 0.5:
-        return np.mean((y_true[mask] - y_pred[mask])[y_true[mask] > y_pred[mask]])
+        return ((y_true - y_pred)[y_true >= y_pred]).mean()
     else:
-        return np.mean((y_true[mask] - y_pred[mask])[y_true[mask] < y_pred[mask]])
+        return ((y_true - y_pred)[y_true <= y_pred]).mean()
 
 def max_exceedance(y_true, y_pred, tau = 0.975, **kwargs):
     '''
@@ -100,11 +97,10 @@ def max_exceedance(y_true, y_pred, tau = 0.975, **kwargs):
         Maximum excess of observed forecast errors above (or below) corresponding quantile estimates
 
     '''
-    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
     if tau >= 0.5:
-        return np.max(y_true[mask] - y_pred[mask])
+        return (y_true - y_pred).max()
     else:
-        return np.min(y_true[mask] - y_pred[mask])
+        return (y_true - y_pred).min()
 
 def pinball_loss(y_true, y_pred, tau = 0.975, **kwargs):
     '''
@@ -119,8 +115,8 @@ def pinball_loss(y_true, y_pred, tau = 0.975, **kwargs):
             metric is minimized for "optimal" or "true" quantile estimation models
 
     '''
-    mask = ~(np.isnan(y_true) | np.isnan(y_pred))
-    y_true, y_pred = y_true[mask], y_pred[mask]
+#     mask = ~(np.isnan(y_true) | np.isnan(y_pred))
+#     y_true, y_pred = y_true[mask], y_pred[mask]
     return np.mean(np.max(np.array([(1-tau)*(y_pred - y_true), tau*(y_true - y_pred)]), axis = 0))
 
 def reserve_ramp_rate(y_true, y_pred, **kwargs):
@@ -134,9 +130,7 @@ def reserve_ramp_rate(y_true, y_pred, **kwargs):
         Average ramp rate of reserve level/requirement (average absolute rate of change)
 
     '''
-    mask = ~(np.isnan(y_pred))
-    y_pred = y_pred[mask]
-    return np.mean(np.abs(y_pred.values[1:] - y_pred.values[:-1])/((y_pred.index[1:] - y_pred.index[:-1]).astype(int)/(1e9*3600)))
+    return np.mean(np.abs((y_pred.values[1:] - y_pred.values[:-1])/((y_pred.index[1:] - y_pred.index[:-1]).total_seconds()/3600)))
 
 
 # Define function to compute/writeout metrics
@@ -191,19 +185,19 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
         df.set_index('metrics', inplace=True)  # Set index to list of metrics
         df.index.name = None
     
-    # cycle through each of the CV fold to calculate metric
-    for j, CV in enumerate(CV_folds):
-
-        # Get validation mask for CV fold (if provided)
-        if val_masks is not None:
-            val_mask = val_masks[j, :]
-        else:
-            val_mask = np.ones(len(pred_trainval))
-
-        for output in outputs:
-            y_true = output_trainval[output].loc[val_mask == 1]  # Define y_true (validation set)
-            y_pred = pred_trainval[(tau, CV, output)].loc[val_mask == 1]  # Define y_pred (validation set)
+    # default to using entire series if validation mask is not provided
+    if val_masks is None:
+        val_masks = np.ones(CV_folds, len(pred_trainval))
+    
+    # cycle through each of the output
+    for output in outputs:
+        # cycle through each of the CV fold to calculate metric
+        for j, CV in enumerate(CV_folds):
+            
+            y_true = output_trainval[output].loc[val_masks[j]]  # Define y_true (validation set)
+            y_pred = pred_trainval[(tau, CV, output)].loc[val_masks[j]]  # Define y_pred (validation set)
             df[(tau, CV, output)] = ""  # Create empty column to hold metrics
+            
             for metric in metrics:
                 df[(tau, CV, output)][metric.__name__] = metric(y_true, y_pred, tau = tau)  # Compute metric
 
@@ -232,7 +226,7 @@ def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = Non
                                                              df=metrics_value_df, tau=tau, val_masks = val_masks)
 
     if avg_across_folds:
-        metrics_value_df = metrics_value_df.astype('float').mean(axis=1, level=0)
+        metrics_value_df = metrics_value_df.astype('float').groupby(axis=1, level=['Quantiles','Output_Name']).mean()
 
     return metrics_value_df
 
