@@ -7,9 +7,8 @@ import matplotlib.dates as mdates
 E3_colors = [[3, 78, 110], [175, 126, 0], [175, 34, 0], [0, 126, 51], [175, 93, 0], [10, 25, 120]]
 E3_colors = np.array(E3_colors) / 255  # E3 color palette
 HRS_IN_DAY = 24
-MEDIAN = 0.5 # Median represents 50th quantile
+MEDIAN = 0.5
 
-# TODO: Need to reverse reserve directions for load and net-load reserves plotting
 # ==== Active diagnostics functions in use ====
 def get_color_gradient(colors, num_gradient):
     """
@@ -24,7 +23,8 @@ def get_color_gradient(colors, num_gradient):
 
     return color_gradient
 
-def plot_ground_truth(trainval_outputs_by_quantile_df, true_reserves_df, fig, ax, quantiles_of_true_data):
+def plot_ground_truth(trainval_outputs_by_quantile_df, true_reserves_df, q_quant_reg_rtpd_reserves_df,
+                      fig, ax, quantiles_of_true_data):
     """
     Plots ground truth, both the response model was trained to predict and actual historical reserves.
     :param trainval_outputs_by_quantile_df: DataFrame of size (N, 3) - N could correspond to any time span. The 3
@@ -49,25 +49,32 @@ def plot_ground_truth(trainval_outputs_by_quantile_df, true_reserves_df, fig, ax
                color=E3_colors[5], alpha=0.5)
     # Plot true reserves data, if provided by user
     if true_reserves_df is not None:
-        ax.plot(true_reserves_df.index, true_reserves_df["UP"], label="True RTPD Reserves (95% CI)", color=E3_colors[3])
+        ax.plot(true_reserves_df.index, true_reserves_df["UP"], label="CAISO's Hist Method, 2.5% to 97.5%", color=E3_colors[3])
         ax.plot(true_reserves_df.index, true_reserves_df["DOWN"], color=E3_colors[3])
+    if q_quant_reg_rtpd_reserves_df is not None:
+        ax.plot(q_quant_reg_rtpd_reserves_df.index, q_quant_reg_rtpd_reserves_df["UP"], label="CAISO's Q-Regression, 2.5% to 97.5%",
+                color=E3_colors[3], linestyle = "--")
+        ax.plot(q_quant_reg_rtpd_reserves_df.index, q_quant_reg_rtpd_reserves_df["DOWN"], color=E3_colors[3],
+                linestyle = "--")
     return fig, ax
 
-# TODO: Replace 3 occurrences below with this func call
-# TODO: Need to feed in E3_colors_gradient
-def plot_model_predictions(model_pred_df, fig, ax):
-    # TODO: Finish docstring
+def plot_model_predictions(model_pred_df, num_PI_pairs, fig, ax):
     """
+    Plots model predictions at different quantiles
+    :param model_pred_df: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
+    of different forecast quantiles
+    :param num_PI_pairs: Int/Float: Number of PI pairs to be used to determine color gradients while plotting
+    :param fig, ax: The figure and axis objects to be plotted on top of, in this function
+    :return: fig, ax: Figure and axis objects that contain the model predictions plotted in this function
+    """
+    # Get colors for different prediction intervals to be plotted
+    E3_colors_gradient = get_color_gradient(E3_colors, num_PI_pairs)
 
-    :param pred_trainval_df:
-    :param fig:
-    :param ax:
-    :return: fig, ax: Figure and axis objects that contain the model predictions plotted made in this function
-    """
+    # Plot each prediction interval
     for i, PI in enumerate(model_pred_df.columns):
         if PI == MEDIAN:  # plot median forecast as a line
             ax.plot(model_pred_df.index, model_pred_df[MEDIAN],
-                          label="E3 Prediction, Quantile: {:.1%} to  {:.1%}".format(MEDIAN), color=E3_colors[1])
+                          label="E3 Prediction, Quantile: {:.1%}".format(MEDIAN), color=E3_colors[1])
         elif PI < MEDIAN:  # plot symmetrical non median quantiles as a shaded range
             ax.fill_between(model_pred_df.index, model_pred_df[PI],
                                   model_pred_df[1 - PI], color=E3_colors_gradient[0, i],
@@ -75,10 +82,51 @@ def plot_model_predictions(model_pred_df, fig, ax):
 
     return fig, ax
 
+def groupby_helper(list_of_df, input_var_discretized, list_of_agg_func, list_of_interp):
+    """
+    Performs groupby and aggregate operations on a list of DataFrames
+    :param list_of_df: List of DataFrames operations are to be performed on
+    :param input_var_discretized: Discretized variable groups used to perform groupby
+    :param list_of_agg_func: How should groups be aggregated after groupby? Options are eihter "mean" or a float
+    corresponding to the quantile value that will represent each group
+    :param list_of_interp: If quantile isn't unique, what "interpolation" method is to be used to pick one?
+    :return: List of DataFrames after groupby and aggregation has been performed on each
+    """
+    # Initialize collector to store dfs after groupby and aggregation by user-defined func is conducted
+    list_of_grouped_df = []
+    # Iterate over each df, aggregating as user desires
+    for df_idx, df in enumerate(list_of_df):
+        if list_of_agg_func[df_idx] == "mean":
+            list_of_grouped_df.append(df.groupby(input_var_discretized).mean())
+        else:
+            list_of_grouped_df.append(df.groupby(input_var_discretized).quantile(list_of_agg_func[df_idx],
+                                                                             interpolation = list_of_interp[df_idx]))
+    return list_of_grouped_df
 
-# TODO: Get rid of switch_forecast_direction_flag if not needed
-def compare_predictions_to_truth(pred_trainval, input_var_name, response_label, trainval_outputs,
-                                 hist_rtpd_reserves, switch_forecast_direction_flag, quantiles_of_true_data):
+def find_datetimes(df, master_df):
+    """
+    Identifies a datetime corresponding to each entry in df by looking for that entry in the master df
+    :param df: DataFrame with entries, corresponding datetimes for which need to be identified
+    :param master_df: DataFrame with datetimes as index and a single column holding entries which must comprise
+    df's entries within it
+    :return: A DataFrame consistent in shape as df, holding datetimes corresponding to df's entries in the master df
+    """
+    # Define collector to store these datetimes
+    datetimes_df = pd.DataFrame(index = df.index, columns = df.columns, dtype = object)
+    # Iterate over each column and row(hour), finding the datetime corresponding to each element in df
+    # and storing it in datetimes df
+    for col in df.columns:
+        for hr in df.index:
+            master_df_in_hour = master_df[master_df.index.hour == hr]
+            bool_arr = master_df[master_df.index.hour == hr].values == df.loc[hr, col]
+            date_time = master_df[master_df.index.hour == hr].index[bool_arr][0] # Pick first if multiple
+            datetimes_df.loc[hr, col] = date_time
+
+    return datetimes_df
+
+def compare_predictions_to_truth(pred_trainval, input_var_name, response_label, response_type,
+                                 trainval_outputs, hist_rtpd_reserves, quant_reg_rtpd_reserves,
+                                 quantiles_of_true_data):
     """
     Plot the the model predictions and the ground truth for points that lie at the very edge of the desired prediction 
     interval in each hour. True reserves held can be overlaid on top for comparison with model predicted reserves if
@@ -86,51 +134,39 @@ def compare_predictions_to_truth(pred_trainval, input_var_name, response_label, 
     :param pred_trainval: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
     of different forecast quantiles
     :param input_var_name: str, name of the input variable for use in labeling
-    :param response_label: str ,name of the output variable for use in labeling
+    :param response_label: str,name of the output variable for use in labeling
+    :param response_type: str, = "load" or "generation" based on model-response type. Used to determine sign-convention
+    to ensure headroom and footroom are always above reserves = 0 and below reserves = 0 axis respectively
     :param trainval_outputs: pd.Series (N,1), N being the number of samples. Contains the ground truth the model was
     trained to predict
     :param hist_rtpd_reserves: pd.DataFrame (N,2), N being the number of samples and 2-> Up and Down reserves. Contains
     actual reserves data, if provided by the user to be visually compared to true forecast errors and model predictions
-    :param switch_forecast_direction_flag: Boolean. Can be used by user to reverse direction of both actual and implied
-    reserves if for example forecast error convention implies headroom will be negative, but user wants to show
-    headroom as positive and footroom as negative
     :param quantiles_of_true_data: List (Float), The low, mid and high quantiles of true data to be plotted
     :return fig, axarr: matplotlib Fig and axes array that contains the finished plots
     :return q_truth_df, q_model_pred_df: DataFrame(FLoats) - Hold truth/model prediction data for each hour, as being
     plotted in this function. Passed out for user to analyze and save as need be.
     """
     lower_quantile_of_true_data, mid_quantile_of_true_data, upper_quantile_of_true_data = quantiles_of_true_data
+    num_PI_pairs = (len(pred_trainval.columns) - 1) / 2
     # Identify datetimes wherein true forecast error was at user defined quantile(s) in each hour
-    # Define collector to store these datetimes
-    q_datetimes_df = pd.DataFrame({lower_quantile_of_true_data:np.zeros((HRS_IN_DAY), dtype=object),
-                        mid_quantile_of_true_data:np.zeros((HRS_IN_DAY), dtype=object),
-                        upper_quantile_of_true_data:np.zeros((HRS_IN_DAY), dtype=object)})
-    # Define collector to store the true forecast errors at these datetimes
-    q_truth_df = pd.DataFrame({lower_quantile_of_true_data:np.zeros(HRS_IN_DAY),
-                        mid_quantile_of_true_data:np.zeros(HRS_IN_DAY),
-                        upper_quantile_of_true_data:np.zeros(HRS_IN_DAY)})
-    for hr in range(HRS_IN_DAY):
-        for q_idx, quant in enumerate(quantiles_of_true_data):
-            # Find true forecast error at a particular quantile
-            # Since we need an exact datetime, can't interpolate between quantiles.
-            # "Interpolate" such that the quantile doesn't go out of desired prediction interval coverage.
-            # When trying to find 2.5th quantile, we'll settle for 3rd quantile and when finding
-            # 97.5th quantile, we'll settle for the 97th for example
-            if quant < MEDIAN:
-                interp_direction = "higher"
-            elif quant == MEDIAN:
-                interp_direction = "nearest"
-            else:
-                interp_direction = "lower"
-            true_err_at_quant = trainval_outputs[trainval_outputs.index.hour == hr].quantile(q = quant, 
-                                                                                             interpolation = interp_direction)
-            # Store this true forecast error
-            q_truth_df.loc[hr, quant] = true_err_at_quant
-            # Identify datetime when this error is recognized
-            bool_arr = trainval_outputs[trainval_outputs.index.hour == hr].values == true_err_at_quant
-            dt_for_true_err_at_quant = trainval_outputs[trainval_outputs.index.hour == hr].index[bool_arr][0] # Pick first if multiple
-            # Store this datetime for later use to identify coincident prediction and true FRP reserves
-            q_datetimes_df.loc[hr, quant] = dt_for_true_err_at_quant
+    # Since we need an exact datetime, can't interpolate between quantiles.
+    # "Interpolate" such that the quantile doesn't go out of desired prediction interval coverage.
+    # When trying to find 2.5th quantile, we'll settle for 3rd quantile and when finding
+    # 97.5th quantile, we'll settle for the 97th for example
+    list_of_interp = []
+    for q_idx, quant in enumerate(quantiles_of_true_data):
+        if quant < MEDIAN:
+            list_of_interp.append("higher")
+        else:
+            list_of_interp.append("lower")
+    # Find true forecast error at a particular quantile in each hour
+    q_truth_df = pd.concat(groupby_helper([trainval_outputs, trainval_outputs, trainval_outputs],
+                                          trainval_outputs.index.hour, quantiles_of_true_data, list_of_interp),
+                           axis = 1)
+    q_truth_df.columns = quantiles_of_true_data
+
+    # Now find datetimes corresponding to these forecast errors
+    q_datetimes_df = find_datetimes(q_truth_df, trainval_outputs)
     
     # Now, get the model prediction at the datetimes identified above
     q_model_pred_df = pd.DataFrame({lower_quantile_of_true_data:np.zeros(HRS_IN_DAY),
@@ -144,35 +180,46 @@ def compare_predictions_to_truth(pred_trainval, input_var_name, response_label, 
         # Store predictions - to be plotted later
         q_model_pred_df[quant] = model_pred_at_quant
 
+    # This ensures  head-room is shown above reserves = 0 axis and foot-room is conversely shown below reserves = 0 axis
+    if response_type == "load":
+        q_model_pred_df = - q_model_pred_df
+        q_truth_df = - q_truth_df
+
     # If the response is associated with net load, historical FRP reserves are relevant. Identify those at
     # datetimes identified above for each quantile if user passed on the reserves info
     if hist_rtpd_reserves is None:
         q_hist_rtpd_reserves = None
     else:
-        # Forecast error is defined as Forecast - Actual. So, need up reserves when forecast error is negative
-        # (low quantile)
-        # TODO: If forecast error direction is changed upstream, mapping of up/down to low/high quantile will change
+        # Forecast error is defined as Forecast - Actual. So, need UP reserves when forecast error is negative
+        # i.e Model predictions for quantiles below MEDIAN correspond to UP reserves needed
         q_hist_rtpd_reserves_up = hist_rtpd_reserves.loc[q_datetimes_df[lower_quantile_of_true_data].values, "UP"].values
         q_hist_rtpd_reserves_down = hist_rtpd_reserves.loc[q_datetimes_df[upper_quantile_of_true_data].values, "DOWN"].values
+        # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
+        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
+        q_hist_rtpd_reserves_down *= (-1)
         q_hist_rtpd_reserves = pd.DataFrame({"UP":q_hist_rtpd_reserves_up, "DOWN":q_hist_rtpd_reserves_down})
 
-    
-    # TODO: Get rid of this if we change our forecast error definition upstream
-    # This is currently ensuring headroom is shown above y = 0 axis
-    if switch_forecast_direction_flag:
-        for quant in quantiles_of_true_data:
-            q_model_pred_df[quant] = - q_model_pred_df[quant]
-            q_truth_df[quant] = - q_truth_df[quant]
-        if hist_rtpd_reserves is not None:
-           q_hist_rtpd_reserves = - q_hist_rtpd_reserves
+    if quant_reg_rtpd_reserves is None:
+        q_quant_reg_rtpd_reserves = None
+    else:
+        # Forecast error is defined as Forecast - Actual. So, need UP reserves when forecast error is negative
+        # i.e Model predictions for quantiles below MEDIAN correspond to UP reserves needed
+        q_quant_reg_rtpd_reserves_up = quant_reg_rtpd_reserves.loc[q_datetimes_df[lower_quantile_of_true_data].values, "UP"].values
+        q_quant_reg_rtpd_reserves_down = quant_reg_rtpd_reserves.loc[q_datetimes_df[upper_quantile_of_true_data].values, "DOWN"].values
+        # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
+        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
+        q_quant_reg_rtpd_reserves_down *= (-1)
+        q_quant_reg_rtpd_reserves = pd.DataFrame({"UP":q_quant_reg_rtpd_reserves_up,
+                                                  "DOWN":q_quant_reg_rtpd_reserves_down})
     
     # Plot the true forecast errors, coincident model predictions and coincident FRP reserves, if applicable
     fig, ax = plt.subplots()
     # Plot coincident model predictions
-    fig, ax = plot_model_predictions(q_model_pred_df, fig, ax)
+    fig, ax = plot_model_predictions(q_model_pred_df, num_PI_pairs, fig, ax)
     
     # Plot true forecast errors and hist rtpd reserves (if provided by user)
-    fig, ax = plot_ground_truth(q_truth_df, q_hist_rtpd_reserves, fig, ax, quantiles_of_true_data)
+    fig, ax = plot_ground_truth(q_truth_df, q_hist_rtpd_reserves, q_quant_reg_rtpd_reserves,
+                                fig, ax, quantiles_of_true_data)
         
     # Set labels and legend
     ax.set_title(response_label + ' Forecast Uncertainty v.s. ' + input_var_name)
@@ -184,7 +231,8 @@ def compare_predictions_to_truth(pred_trainval, input_var_name, response_label, 
     return fig, ax, q_truth_df, q_model_pred_df
 
 def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, input_var_name, response_label,
-                                      trainval_inputs, trainval_outputs, hist_rtpd_reserves, quantiles_of_true_data):
+                                      response_type, trainval_inputs, trainval_outputs, hist_rtpd_reserves,
+                                      quant_reg_rtpd_reserves, quantiles_of_true_data):
     """
     Plot the bias (bottom panel) and uncertainty (top panel )grouped by a certain input feature.
     The input feature must take discreet value for the groupedby function to work properly
@@ -193,6 +241,8 @@ def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, inp
     :param input_var_discretized: The input features used for grouping. Must be discrete values.
     :param input_var_name: str, name of the input variable for use in labeling
     :param response_label: str ,name of the output variable for use in labeling
+    :param response_type: str, = "load" or "generation" based on model-response type. Used to determine sign-convention
+    to ensure headroom and footroom are always above reserves = 0 and below reserves = 0 axis respectively
     :param trainval_inputs: pd.Series (N,1), N being the number of samples. Contains the input variable values that the
     response variable will be plotted against. Can be used to overlay a response-input scatter plot on top of the
     diagnostic plot
@@ -203,88 +253,67 @@ def plot_uncertainty_groupedby_feature(pred_trainval, input_var_discretized, inp
     :param quantiles_of_true_data: List (Float), The low, mid and high quantiles of true data to be plotted
     :return fig, axarr: matplotlib Fig and axes array that contained the finished plots
     """
-    lower_quantile_of_true_data, mid_quantile_of_true_data, upper_quantile_of_true_data = quantiles_of_true_data
-    # group the uncertainty and bias based on discretized input variable
-    pred_trainval_groupedby_input = pred_trainval.groupby(input_var_discretized).mean()
-
-    # Prepare fig.
-    fig, ax = plt.subplots()
-    # create color gradients based on E3 colors
-    num_PI_pairs = (len(pred_trainval_groupedby_input.columns) - 1) / 2
-    E3_colors_gradient = get_color_gradient(E3_colors, num_PI_pairs)
-
-    # Bottom panel: Bias. Cycle through model prediction at all target quantiles
-    # TODO: Put this as is in a func. Can work with both ts range and compare truth to pred coz they both use pred df with quantiles as col names
-    # Can pass in df and labels maybe. Can use index and values in a col inside func to plot x and y1, y2
-
-    for i, PI in enumerate(pred_trainval_groupedby_input.columns):
-        if PI == MEDIAN:  # plot median forecast as a line
-            axarr[1].plot(pred_trainval_groupedby_input.index, pred_trainval_groupedby_input[MEDIAN],
-                          label="Quantile = {:.1%}".format(MEDIAN), color=E3_colors[1])
-        elif PI < MEDIAN:  # plot symmetrical non median quantiles as a shaded range
-            axarr[1].fill_between(pred_trainval_groupedby_input.index, pred_trainval_groupedby_input[PI],
-                                  pred_trainval_groupedby_input[1 - PI], color=E3_colors_gradient[0, i],
-                                  label="Quantile: {:.1%} to  {:.1%}".format(PI, 1 - PI))
-    # TODO end
-    
-    # Group ground truth, akin to model predictions
-    trainval_outputs_groupedby_input_low = trainval_outputs.groupby(input_var_discretized.values).quantile(lower_quantile_of_true_data)
-    trainval_outputs_groupedby_input_mid = trainval_outputs.groupby(input_var_discretized.values).quantile(mid_quantile_of_true_data)
-    trainval_outputs_groupedby_input_high = trainval_outputs.groupby(input_var_discretized.values).quantile(upper_quantile_of_true_data)
+    num_PI_pairs = (len(pred_trainval.columns) - 1) / 2
+    # Group model predictions and ground truth  based on discretized input variable
+    # Collate dfs to be aggregated and info to be used while aggregating
+    list_of_dfs_to_be_grouped = [pred_trainval, trainval_outputs, trainval_outputs, trainval_outputs]
+    # Aggregating function should either be "mean" or a float representing a quantile identified to represent each group
+    list_of_agg_func = ["mean"] + quantiles_of_true_data
+    # When aggregating with a quantile, several ways to "interpolate" when quantile isn't unique. "linear" is default
+    list_of_interp = ["NA", "linear", "linear", "linear"]
+    # Get grouped dfs
+    list_of_grouped_dfs = groupby_helper(list_of_dfs_to_be_grouped, input_var_discretized, list_of_agg_func,
+                                          list_of_interp)
+    pred_trainval_groupedby_input, trainval_outputs_groupedby_input_low, trainval_outputs_groupedby_input_mid, trainval_outputs_groupedby_input_high = list_of_grouped_dfs
     trainval_outputs_groupedby_input = pd.concat([trainval_outputs_groupedby_input_low,
                                                   trainval_outputs_groupedby_input_mid,
                                                   trainval_outputs_groupedby_input_high], axis = 1)
     trainval_outputs_groupedby_input.columns = quantiles_of_true_data
 
-    # Group RTPD reserves data, akin to above if provided by user
+    # This ensures  head-room is shown above reserves = 0 axis and foot-room is conversely shown below reserves = 0 axis
+    if response_type == "load":
+        pred_trainval_groupedby_input = - pred_trainval_groupedby_input
+        trainval_outputs_groupedby_input = - trainval_outputs_groupedby_input
+
+    # Group RTPD reserves data, if provided by user
     if hist_rtpd_reserves is None:
         hist_rtpd_reserves_groupedby_input = None
     else:
         hist_rtpd_reserves_groupedby_input = hist_rtpd_reserves.groupby(input_var_discretized.values).mean()
+        # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
+        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
+        hist_rtpd_reserves_groupedby_input["DOWN"] = -hist_rtpd_reserves_groupedby_input["DOWN"]
+
+    # Group RTPD reserves data, if provided by user
+    if quant_reg_rtpd_reserves is None:
+        quant_reg_rtpd_reserves_groupedby_input = None
+    else:
+        quant_reg_rtpd_reserves_groupedby_input = quant_reg_rtpd_reserves.groupby(input_var_discretized.values).mean()
+        # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
+        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
+        quant_reg_rtpd_reserves_groupedby_input["DOWN"] = -quant_reg_rtpd_reserves_groupedby_input["DOWN"]
+
+    # Prepare fig
+    fig, ax = plt.subplots()
+
+    # Plot model predictions at all target quantiles
+    fig, ax = plot_model_predictions(pred_trainval_groupedby_input, num_PI_pairs, fig, ax)
 
     # Plot ground truth and historical rtpd reserves(if provided by user)
-    fig, axarr[1] = plot_ground_truth(trainval_outputs_groupedby_input, hist_rtpd_reserves_groupedby_input,
-                                      fig, axarr[1], quantiles_of_true_data)
+    fig, ax = plot_ground_truth(trainval_outputs_groupedby_input, hist_rtpd_reserves_groupedby_input,
+                                quant_reg_rtpd_reserves_groupedby_input, fig, ax, quantiles_of_true_data)
 
     # This will make a scatter plot of response_label v/s input_var_name over the entire dataset provided to this
     # function as is, without any grouping/binning
-    # axarr[1].scatter(trainval_inputs, trainval_outputs, color = E3_colors[2], alpha = 0.009,label = 'Ground Truth')
+    # ax.scatter(trainval_inputs, trainval_outputs, color = E3_colors[2], alpha = 0.009,label = 'Ground Truth')
 
     # set labels and legends
-    axarr[1].set_ylabel('Quantile of Forecast Err (MW)')
-    axarr[1].legend(frameon=False, loc='center left', bbox_to_anchor=[1, 0.5])
+    ax.set_ylabel('Quantile of Forecast Err (MW)')
+    ax.legend(frameon=False, loc='center left', bbox_to_anchor=[1, 0.5])
+    ax.set_title(response_label + ' Forecast Uncertainty v.s. ' + input_var_name)
+    ax.set_xlabel(input_var_name)
 
-    # TODO: Need to get rid of this section. We never show the top panel
-    # Top panel: uncertainty. Cycle through model prediction at all target quantiles
-    # TODO: Need to reverse reserve directions for load and net-load plotting
-    for i, PI in enumerate(pred_trainval_groupedby_input.columns):
-        if PI < MEDIAN:
-            label = "P{:.0f}".format(100 * (1 - 2 * PI))
-            # upward reserve is floored at 0, while downward reserve is capped at 0
-            upward_reserve = np.maximum(pred_trainval_groupedby_input[1 - PI], 0)
-            downward_reserve = np.minimum(pred_trainval_groupedby_input[PI], 0)
-
-            # obtain the expected width of each bar of the bar plot
-            input_var_range = pred_trainval_groupedby_input.index
-            bar_width = ((input_var_range[-1] - input_var_range[0])
-                         / (input_var_range.size - 1) * 0.8)
-
-            # plot a bar for each bin of the input variable
-            axarr[0].bar(input_var_range, upward_reserve, color=E3_colors_gradient[0, i],
-                         width=bar_width, label=label + " Up Reserve")
-            axarr[0].bar(input_var_range, downward_reserve, color=E3_colors_gradient[1, i],
-                         width=bar_width, label=label + " Down Reserve")
-
-    # labels, legends, tiles
-    axarr[0].legend(frameon=False, loc='center left', bbox_to_anchor=[1, 0.5])
-    axarr[0].set_ylabel('Reserves (MW)')
-    axarr[0].set_title(response_label + ' Forecast Uncertainty v.s. ' + input_var_name)
-    axarr[-1].set_xlabel(input_var_name)
-
-    fig.set_size_inches(8, 6)  # resetting figure size
-    fig.tight_layout()  # avoid overlapping axes
-
-    return fig, axarr
+    return fig, ax
 
 
 def discretize_input(input_var, n_bins=50):
@@ -390,22 +419,23 @@ def plot_compare_train_val(training_hist, PI_percentiles, metrics_to_idx_map, me
 
     return fig, axarr
 
-
-def plot_example_ts(ts_ranges, pred_trainval, output_trainval, response_label):
+def plot_example_ts(ts_ranges, pred_trainval, output_trainval, response_label, response_type):
     """
     Visualize the example periods of time, with the true errors and different quantile forecasts.
     :param ts_ranges: A list of periods to plot. Each element must be valid index for a pd.datetimeindex.
     :param pred_trainval: pd dataframe of (num_samples, num_PIs). A record of quantile forecast for all training samples
     :param output_trainval: pd dataframe of (num_samples, 1). True forecast errors for all training samples
-    :response_label: str, name of the output variable for use in labeling
+    :param response_label: str, name of the output variable for use in labeling
+    :param response_type: str, = "load" or "generation" based on model-response type. Used to determine sign-convention
+    to ensure headroom and footroom are always above reserves = 0 and below reserves = 0 axis respectively
     :return fig, axarr: Finished plots of the example timeseries. Different periods are in its own panel.
     """
     fig, axarr = plt.subplots(len(ts_ranges), 1, sharey=True)
 
-    # create color gradients based on E3 colors
-    PI_percentiles = pred_trainval.columns
-    num_PI_pairs = (len(PI_percentiles) - 1) / 2
-    E3_colors_gradient = get_color_gradient(E3_colors, num_PI_pairs)
+    # This ensures  head-room is shown above reserves = 0 axis and foot-room is conversely shown below reserves = 0 axis
+    if response_type == "load":
+        pred_trainval = - pred_trainval
+        output_trainval = - output_trainval
 
     # cycle through the example time series that needs to be plotted
     for i, ts_range in enumerate(ts_ranges):
@@ -414,12 +444,8 @@ def plot_example_ts(ts_ranges, pred_trainval, output_trainval, response_label):
         axarr[i].plot(output_trainval.loc[ts_range], color=E3_colors[1], label='True Forecast Error')
         axarr[i].plot(pred_trainval.loc[ts_range, MEDIAN], color=E3_colors[0], dashes=[2, 2], label='Median bias - 50%')
 
-        # cycle through each target quantile pair
-        for j, PI in enumerate(PI_percentiles):
-            if PI < MEDIAN:
-                axarr[i].fill_between(pred_trainval.loc[ts_range].index, pred_trainval.loc[ts_range, PI],
-                                      pred_trainval.loc[ts_range, 1 - PI], color=E3_colors_gradient[0, j],
-                                      label='{:.0%}-{:.0%} range'.format(PI, 1 - PI))
+        # plot model predictions at each target quantile
+        fig, axarr[i] = plot_model_predictions(pred_trainval.loc[ts_range], fig, axarr[i])
 
         # Mark the date of this series.
         axarr[i].text(0.05, 0.85, pd.Timestamp(ts_range).strftime('%x'), transform=axarr[i].transAxes)
