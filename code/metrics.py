@@ -4,7 +4,7 @@ import os
 import pathlib
 
 # Define helper function to get validation set predictions from cross-validation fold masks
-def get_validation_preds(pred_trainval, tau, output, val_masks):
+def get_validation_preds(pred_trainval, val_masks):
     '''
     Stitch together validation set predictions from multi-objective pred_trainval predictions dataframe
 
@@ -17,14 +17,21 @@ def get_validation_preds(pred_trainval, tau, output, val_masks):
     Returns:
         preds (Pandas Series): Validation set predictions for given tau, target from all CV folds stitched together along a single axis
     '''
+    
+    # check if the validation masks covers exactly once the full range of trainval data
+    assert (np.sum(val_masks, axis=0)==1).all(), "the validation masks does not cover trainval data exactly once!"
 
-    preds = np.zeros(len(pred_trainval))
-    for j, CV in enumerate(pred_trainval.columns.levels[1]):
-        val_mask = val_masks[j, :]  # Get validation mask
-        preds += pred_trainval[(tau, CV, output)] * val_mask
-    preds = pd.Series(data=preds, index=df.index)
+    # initialize container for the prediction on the validation set alone
+    pred_val = pred_trainval.groupby(axis =1, level=['Quantiles','Output_Name']).mean()
+    pred_val[:] = 0
 
-    return preds
+    # cycle through all tau and outputs
+    for tau in pred_trainval.columns.get_level_values('Quantiles').unique():
+        for output in pred_trainval.columns.get_level_values('Output_Name').unique():
+            curr_pred = pred_trainval.xs((tau,output),axis = 1, level = ['Quantiles','Output_Name'])
+            pred_val[(tau, output)] = (curr_pred*val_masks.T).sum(axis=1)
+            
+    return pred_val
 
 # Define metrics
 
@@ -80,7 +87,6 @@ def exceedance(y_true, y_pred, tau = 0.975, **kwargs):
         exceed corresponding quantile estimates
 
     '''
-
     if tau >= 0.5:
         return ((y_true - y_pred)[y_true >= y_pred]).mean()
     else:
@@ -180,7 +186,7 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
 
     # Initialize dataframe if not passed to function in arguments
     if df is None:
-        df = pd.DataFrame()  # Create new dataframe if no existing dataframe is given
+        df = pd.DataFrame(dtype = 'float')  # Create new dataframe if no existing dataframe is given
         df['metrics'] = [metric.__name__ for metric in metrics]
         df.set_index('metrics', inplace=True)  # Set index to list of metrics
         df.index.name = None
@@ -227,6 +233,7 @@ def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = Non
 
     if avg_across_folds:
         metrics_value_df = metrics_value_df.astype('float').groupby(axis=1, level=['Quantiles','Output_Name']).mean()
+        
 
     return metrics_value_df
 
