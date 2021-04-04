@@ -141,14 +141,14 @@ def reserve_ramp_rate(y_true, y_pred, **kwargs):
 
 # Define function to compute/writeout metrics
 
-def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, tau=0.975,
-                                      filename=None, val_masks=None, metrics=(coverage,
-                                                              requirement,
-                                                              exceedance,
-                                                              closeness,
-                                                              max_exceedance,
-                                                              reserve_ramp_rate,
-                                                              pinball_loss)):
+def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, tau=0.975, val_masks=None, 
+                                      metrics=(coverage,
+                                               requirement,
+                                               exceedance,
+                                               closeness,
+                                               max_exceedance,
+                                               reserve_ramp_rate,
+                                               pinball_loss)):
     """
 
     Description:
@@ -210,13 +210,11 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
     df = df.T.set_index(
         pd.MultiIndex.from_tuples(df.T.index, names=('Quantiles', 'Fold ID', 'Output_Name'))).T  # Reformat to have multi-level columns
 
-    if filename is not None:
-        df.to_csv(filename)  # Write to CSV file
-
     return df
 
 
-def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = None, avg_across_folds=True):
+def compute_metrics_for_all_taus(output_trainval, pred_trainval, dir_str = None, 
+                                 val_masks = None, avg_across_folds=True):
     """
     :param output_trainval:Dataframe of observed forecast errors
     :param pred_trainval: Dataframe of corresponding conditional quantile estimates from machine learning model for
@@ -230,9 +228,15 @@ def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = Non
     for tau in pred_trainval.columns.levels[0]:
         metrics_value_df = compute_metrics_for_specified_tau(output_trainval, pred_trainval,
                                                              df=metrics_value_df, tau=tau, val_masks = val_masks)
-
+    # write all metrics to hard drive 
+    if dir_str is not None:
+        metrics_value_df.to_pickle(dir_str.metrics_path)  # Write to pkl file
+    
+    
     if avg_across_folds:
         metrics_value_df = metrics_value_df.astype('float').groupby(axis=1, level=['Quantiles','Output_Name']).mean()
+    
+    
         
 
     return metrics_value_df
