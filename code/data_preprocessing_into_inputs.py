@@ -31,7 +31,7 @@ import utility
 
 # ==== User inputs ====
 # the name of the model version that this data would serve
-model_name = "rescue_v1_1_no_calendar_multi_objective"
+model_name = "rescue_v1_3"
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
@@ -51,6 +51,7 @@ time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
 # This flag should be set to True, if you want model response to be all of net load, load, solar and wind forecast
 # errors in that order. Set to False for creating a single response variable, the net load forecast error
 multi_obj_learning_flag = True
+
 
 # ==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
@@ -75,8 +76,8 @@ def calculate_response_variables(raw_data_df, response_col_names):
                            raw_data_df["Load_RTD_3_Forecast"]) / 3.0
 
     solar_forecast_error = raw_data_df["Solar_RTPD_Forecast"] - \
-                          (raw_data_df["Solar_RTD_1_Forecast"] + raw_data_df["Solar_RTD_2_Forecast"] + \
-                           raw_data_df["Solar_RTD_3_Forecast"]) / 3.0
+                           (raw_data_df["Solar_RTD_1_Forecast"] + raw_data_df["Solar_RTD_2_Forecast"] + \
+                            raw_data_df["Solar_RTD_3_Forecast"]) / 3.0
 
     wind_forecast_error = raw_data_df["Wind_RTPD_Forecast"] - \
                           (raw_data_df["Wind_RTD_1_Forecast"] + raw_data_df["Wind_RTD_2_Forecast"] + \
@@ -96,7 +97,7 @@ def calculate_response_variables(raw_data_df, response_col_names):
     return response_values_df
 
 
-def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date = None):
+def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date=None):
     """
     Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
     day angle and # of days passed since a start-date which can either be a user input or the first day in the trainval
@@ -182,10 +183,9 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
 
 
 def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predictors,
-         lag_term_end_predictors=lag_term_end_predictors,response_lead_term = response_lead_term,
-         longitude = longitude, time_difference_from_UTC = time_difference_from_UTC,
-         multi_obj_learning_flag = multi_obj_learning_flag):
-
+         lag_term_end_predictors=lag_term_end_predictors, response_lead_term=response_lead_term,
+         longitude=longitude, time_difference_from_UTC=time_difference_from_UTC,
+         multi_obj_learning_flag=multi_obj_learning_flag):
     # ==== Constants for use in script that DON'T need to be user defined ====
     # Labels for response (output(s) model is trained to predict)
     if multi_obj_learning_flag:
@@ -202,7 +202,6 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     day_angle_col_name = "Day_Angle"
     days_from_start_date_col_name = "Days_from_Start_Date"
 
-
     # ==== 1. Reading in raw data and validate/modify the data for downstream manipulation ====
     # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
     dir_str = utility.Dir_Structure(model_name=model_name)
@@ -218,7 +217,6 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
 
     # Embed info about validity into df holding values so we can use the latter alone going forward
     raw_data_df[~raw_data_validity] = None
-    num_time_points = raw_data_df.shape[0]
 
     # Pad the raw data with NaNs in both the lag and lead direction for downstream data manipulation
     raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors,
@@ -235,7 +233,7 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # for the raw data. These will be used as response variable(s) ====
     print("Calculating response(s)....")
     response_df = calculate_response_variables(raw_data_df, response_col_names)
-    raw_data_df = pd.concat([raw_data_df, response_df], axis = 1)
+    raw_data_df = pd.concat([raw_data_df, response_df], axis=1)
 
     # Revise the lag term array since we are extending the original data
     num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
@@ -273,14 +271,16 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     trainval_data_df = trainval_data_df.dropna()
 
     # Separate predictors (model inputs) from response (model output(s))
+    response_col_names = ["{}_T{:+}".format(name,response_lead_term) for name in response_col_names ]
     trainval_outputs_df = trainval_data_df.loc[:, response_col_names].copy()
-    trainval_data_df = trainval_data_df.drop(columns = trainval_outputs_df.columns)
+    trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
 
     # Save trainval samples
     print("Saving files......")
     trainval_data_df.to_pickle(dir_str.input_trainval_path)
     trainval_outputs_df.to_pickle(dir_str.output_trainval_path)
     print("All done!")
+
 
 # run as a script
 if __name__ == '__main__':
