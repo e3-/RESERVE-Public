@@ -213,8 +213,8 @@ def compute_metrics_for_specified_tau(output_trainval, pred_trainval, df=None, t
     return df
 
 
-def compute_metrics_for_all_taus(output_trainval, pred_trainval, dir_str = None, 
-                                 val_masks = None, avg_across_folds=True):
+def compute_metrics_for_all_taus(output_trainval, pred_trainval, val_masks = None, 
+                                 dir_str = None, avg_across_folds=True):
     """
     :param output_trainval:Dataframe of observed forecast errors
     :param pred_trainval: Dataframe of corresponding conditional quantile estimates from machine learning model for
@@ -258,6 +258,7 @@ def n_crossings(pred_trainval, filename = None):
     tau_arr = pred_trainval.columns.levels[0] # Define array of tau (target quantiles)
     CV_folds = pred_trainval.columns.levels[1]  # Define array of CV fold IDs
     outputs = pred_trainval.columns.levels[2] # Define array of target outputs (load, net load, solar, wind)
+    num_samples = pred_trainval.shape[0]
 
     crossings = {}  # Define dictionary to store crossings
 
@@ -266,10 +267,9 @@ def n_crossings(pred_trainval, filename = None):
             # Look for quantile crossings only in sets of predictions from models trained on same CV fold and predicting same target output
             crossings[(CV, output)] = {}
             for i, t1 in enumerate(tau_arr):
-                for j, t2 in enumerate(tau_arr):
-                    if t1 < t2:  # Only evaluate number of quantile crossings on valid lower/upper target percentile pairs
-                        crossings[(CV, output)][(t1, t2)] = sum(
-                            pred_trainval[(t1, CV, output)] > pred_trainval[(t2, CV, output)])  # Record number of quantile crossings
+                for j, t2 in enumerate(tau_arr[i+1:]): # Only evaluate number of quantile crossings on valid lower/upper target percentile pairs
+                    crossings[(CV, output)][(t1, t2)] = sum(
+                        pred_trainval[(t1, CV, output)] > pred_trainval[(t2, CV, output)])/num_samples # Record number of quantile crossings
 
     df = pd.DataFrame(crossings)
     df.columns.names = ('CV Fold ID', 'Output_Name')
