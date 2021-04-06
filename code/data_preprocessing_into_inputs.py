@@ -1,4 +1,8 @@
 # ==== TODO: Consider having option to disallow overlaps between subsequent training samples
+# ==== Change log v1.3 (1/13/2021) ====
+# Enabled script' ability to support both single and multi-objective learning
+# if the multi_obj_learning_flag is set to True, response variables will be net load, load, solar and wind forecast
+# errors in that order. Else, the sole response variable will be the net load forecast error
 
 # ==== Change log v1.2 (11/07/2020) ====
 # Switched to autogeneration of column names in the M by N matrix based on lag and feature name
@@ -27,7 +31,7 @@ import utility
 
 # ==== User inputs ====
 # the name of the model version that this data would serve
-model_name = "rescue_v1_2"
+model_name = "rescue_v1_3"
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
@@ -35,6 +39,7 @@ model_name = "rescue_v1_2"
 # E.g. 2: start = 0 , end = -1 implies do not include any terms for this feature.
 lag_term_start_predictors = np.array([-2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2])
 lag_term_end_predictors = np.array([1, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1])
+# Currently, the same lead term will be applicable to each response variable, if we have several of 'em
 response_lead_term = 1  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1
 
 # Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
@@ -43,36 +48,51 @@ response_lead_term = 1  # As a gentle reminder, its relative to present time, T0
 longitude = -119.4179  # Roughly passing through the center of CA
 time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
 
+# This flag should be set to True, if you want model response to be all of net load, load, solar and wind forecast
+# errors in that order. Set to False for creating a single response variable, the net load forecast error
+multi_obj_learning_flag = True
+
 
 # ==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
-def calculate_response_variable(raw_data_df):
+def calculate_response_variables(raw_data_df, response_col_names):
     """
-    Calculates and stores response variable that the ML model will be trained to predict
-    :param raw_data_df:
+    Calculates and stores response variable(s) that the ML model will be trained to predict
+    :param raw_data_df: Df containing all predictors. Some if not all of them will be used to calculate response(s)
+    :param response_col_names: List with column names corresponding to response variables to be calculated in this
+                               function
     :return: response_values_df - carrying the same data format as raw_data_df but
-    with the response variable calculated
+    with the response variable(s) calculated
     """
-
-    # Fill it in per user provided definition of the response variable
+    # Initialize df to store response variable(s)
+    response_values_df = pd.DataFrame(index=raw_data_df.index, columns=response_col_names)
+    # Fill it in per user provided definition of the response variable(s)
     # NOTE: When a response is calculated using a predictor that was pd.NA, you want the response
     # to be pd.NA as well. Thus, be careful with using functions like pd.sum() which yield sum
     # of NAs to be = 0 for example.
-    net_load_rtpd_forecast = raw_data_df["Load_RTPD_Forecast"] - \
-                             raw_data_df["Solar_RTPD_Forecast"] - \
-                             raw_data_df["Wind_RTPD_Forecast"]
-    net_load_rtd_1_forecast = raw_data_df["Load_RTD_1_Forecast"] - \
-                              raw_data_df["Solar_RTD_1_Forecast"] - \
-                              raw_data_df["Wind_RTD_1_Forecast"]
-    net_load_rtd_2_forecast = raw_data_df["Load_RTD_2_Forecast"] - \
-                              raw_data_df["Solar_RTD_2_Forecast"] - \
-                              raw_data_df["Wind_RTD_2_Forecast"]
-    net_load_rtd_3_forecast = raw_data_df["Load_RTD_3_Forecast"] - \
-                              raw_data_df["Solar_RTD_3_Forecast"] - \
-                              raw_data_df["Wind_RTD_3_Forecast"]
 
-    response_values_df = net_load_rtpd_forecast - (net_load_rtd_1_forecast + net_load_rtd_2_forecast + \
-                                                   net_load_rtd_3_forecast) / 3.0
+    load_forecast_error = raw_data_df["Load_RTPD_Forecast"] - \
+                          (raw_data_df["Load_RTD_1_Forecast"] + raw_data_df["Load_RTD_2_Forecast"] + \
+                           raw_data_df["Load_RTD_3_Forecast"]) / 3.0
+
+    solar_forecast_error = raw_data_df["Solar_RTPD_Forecast"] - \
+                           (raw_data_df["Solar_RTD_1_Forecast"] + raw_data_df["Solar_RTD_2_Forecast"] + \
+                            raw_data_df["Solar_RTD_3_Forecast"]) / 3.0
+
+    wind_forecast_error = raw_data_df["Wind_RTPD_Forecast"] - \
+                          (raw_data_df["Wind_RTD_1_Forecast"] + raw_data_df["Wind_RTD_2_Forecast"] + \
+                           raw_data_df["Wind_RTD_3_Forecast"]) / 3.0
+
+    net_load_forecast_error = load_forecast_error - solar_forecast_error - wind_forecast_error
+
+    # Net load forecast error will be the sole response in single objective learning
+    response_values_df.loc[:, "Net_Load_Forecast_Error"] = net_load_forecast_error
+
+    # The response variable(s) below have been added for multi-objective learning
+    if len(response_col_names) > 1:
+        response_values_df.loc[:, "Load_Forecast_Error"] = load_forecast_error
+        response_values_df.loc[:, "Solar_Forecast_Error"] = solar_forecast_error
+        response_values_df.loc[:, "Wind_Forecast_Error"] = wind_forecast_error
 
     return response_values_df
 
@@ -163,17 +183,24 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
 
 
 def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predictors,
-         lag_term_end_predictors=lag_term_end_predictors,response_lead_term = response_lead_term,
-         longitude = longitude, time_difference_from_UTC = time_difference_from_UTC):
-
+         lag_term_end_predictors=lag_term_end_predictors, response_lead_term=response_lead_term,
+         longitude=longitude, time_difference_from_UTC=time_difference_from_UTC,
+         multi_obj_learning_flag=multi_obj_learning_flag):
     # ==== Constants for use in script that DON'T need to be user defined ====
-    # Labels for response (output model is trained to predict)
-    response_col_name = "Net_Load_Forecast_Error"
+    # Labels for response (output(s) model is trained to predict)
+    if multi_obj_learning_flag:
+        # You can change these labels, but the order MUST be net load->load->solar->wind
+        # To change order or add/remove any response variables, you will need to change the function
+        # calculate_response_variables too
+        response_col_names = ["Net_Load_Forecast_Error", "Load_Forecast_Error", "Solar_Forecast_Error",
+                              "Wind_Forecast_Error"]
+    else:
+        response_col_names = ["Net_Load_Forecast_Error"]
+
     # The names of several calendar related terms
     hour_angle_col_name = "Hour_Angle"
     day_angle_col_name = "Day_Angle"
     days_from_start_date_col_name = "Days_from_Start_Date"
-
 
     # ==== 1. Reading in raw data and validate/modify the data for downstream manipulation ====
     # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
@@ -190,7 +217,6 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
 
     # Embed info about validity into df holding values so we can use the latter alone going forward
     raw_data_df[~raw_data_validity] = None
-    num_time_points = raw_data_df.shape[0]
 
     # Pad the raw data with NaNs in both the lag and lead direction for downstream data manipulation
     raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors,
@@ -203,9 +229,11 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     raw_data_df[hour_angle_col_name], raw_data_df[day_angle_col_name], raw_data_df[days_from_start_date_col_name] = \
         calculate_calendar_based_predictors(raw_data_df.index, longitude, time_difference_from_UTC, raw_data_start_date)
 
-    # ==== 3. Add in netload forecast difference for the raw data ====
-    print("Calculating response....")
-    raw_data_df[response_col_name] = calculate_response_variable(raw_data_df)
+    # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
+    # for the raw data. These will be used as response variable(s) ====
+    print("Calculating response(s)....")
+    response_df = calculate_response_variables(raw_data_df, response_col_names)
+    raw_data_df = pd.concat([raw_data_df, response_df], axis=1)
 
     # Revise the lag term array since we are extending the original data
     num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
@@ -219,7 +247,7 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # Initialize collectors to hold (and later save) trainval data in
     trainval_data_df = pd.DataFrame(None, index=raw_data_df.index[raw_data_start_idx:raw_data_end_idx])
 
-    # Colelct lag term predictors for all trainval samples
+    # Collect lag term predictors for all trainval samples
     # Iterate over each type of lag term predictor
     for feature_idx, feature_type in enumerate(raw_data_df.columns):
 
@@ -239,11 +267,13 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     print("{} of {} trainval samples are valid"
           .format(trainval_data_df.notna().all(axis=1).sum(), trainval_data_df.shape[0]))
     print("Proceeding to delete the rest....")
+    # Only retain trainval samples wherein predictor(s) and response(s) are both valid
     trainval_data_df = trainval_data_df.dropna()
 
-    # Only retain trainval samples wherein predictor(s) and response are both valid
-    output_idx = np.where([response_col_name in col for col in trainval_data_df.columns])[0][0]
-    trainval_outputs_df = trainval_data_df.pop(trainval_data_df.columns[output_idx])
+    # Separate predictors (model inputs) from response (model output(s))
+    response_col_names = ["{}_T{:+}".format(name,response_lead_term) for name in response_col_names ]
+    trainval_outputs_df = trainval_data_df.loc[:, response_col_names].copy()
+    trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
 
     # Save trainval samples
     print("Saving files......")

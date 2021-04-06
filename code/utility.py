@@ -22,7 +22,8 @@ class Dir_Structure:
         self.logs_dir = os.path.join(self.par_dir, "logs", self.model_name)  # training log for tensorboard
         self.ckpts_dir = os.path.join(self.par_dir, "ckpts", self.model_name)  # check points for accidental pauses
         self.models_dir = os.path.join(self.par_dir, "models", self.model_name)  # trained models are stored here
-        self.diag_dir = os.path.join(self.par_dir, "diagnostics", self.model_name)  # graphs and diagnostics
+        self.diag_dir = os.path.join(self.par_dir, "diagnostics", self.model_name)  # diagnostics
+        self.plots_dir = os.path.join(self.par_dir, "diagnostics", self.model_name, "plots")  # diagnostic plots
 
         # Define paths to files
         self.shuffled_indices_path = os.path.join(self.data_dir, "shuffled_indices_{}.npy".format(self.model_name))
@@ -42,7 +43,7 @@ class Dir_Structure:
         self.make_directories()
 
     def make_directories(self):
-        for folder in [self.data_dir, self.raw_data_dir, self.output_dir,
-                       self.logs_dir, self.ckpts_dir, self.models_dir, self.diag_dir]:
+        for folder in [self.data_dir, self.raw_data_dir, self.output_dir, self.logs_dir, 
+                       self.ckpts_dir, self.models_dir, self.diag_dir, self.plots_dir]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
