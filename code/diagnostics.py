@@ -105,42 +105,18 @@ def find_datetimes(df, master_df):
 
     # If the response is associated with net load, historical FRP reserves are relevant. Identify those at
     # datetimes identified above for each quantile if user passed on the reserves info
-    if hist_rtpd_reserves is None:
-        q_hist_rtpd_reserves = None
+    if plot_other_methods:
+        other_method_reserves = None
     else:
-        # Forecast error is defined as Forecast - Actual. So, need UP reserves when forecast error is negative
-        # i.e Model predictions for quantiles below MEDIAN correspond to UP reserves needed
-        q_hist_rtpd_reserves_up = hist_rtpd_reserves.loc[q_datetimes_df[lower_quantile_of_true_data].values, "UP"].values
-        q_hist_rtpd_reserves_down = hist_rtpd_reserves.loc[q_datetimes_df[upper_quantile_of_true_data].values, "DOWN"].values
+        # For the histogram mothod, model predictions for quantiles below MEDIAN correspond to UP reserves needed
+        other_method_reserves['up'] = hist_rtpd_reserves.loc[eg_pred_val[foot_room_quantile].index, "UP"]
         # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
-        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
-        q_hist_rtpd_reserves_down *= (-1)
-        q_hist_rtpd_reserves = pd.DataFrame({"UP":q_hist_rtpd_reserves_up, "DOWN":q_hist_rtpd_reserves_down})
-
-    if quant_reg_rtpd_reserves is None:
-        q_quant_reg_rtpd_reserves = None
-    else:
-        # Forecast error is defined as Forecast - Actual. So, need UP reserves when forecast error is negative
-        # i.e Model predictions for quantiles below MEDIAN correspond to UP reserves needed
-        q_quant_reg_rtpd_reserves_up = quant_reg_rtpd_reserves.loc[q_datetimes_df[lower_quantile_of_true_data].values, "UP"].values
-        q_quant_reg_rtpd_reserves_down = quant_reg_rtpd_reserves.loc[q_datetimes_df[upper_quantile_of_true_data].values, "DOWN"].values
-        # Multiply DOWN reserves by (-1) so they will be plotted below reserves = 0 line in the figure
-        # This script assumes both UP and DOWN reserves are positive in the raw data being fed
-        q_quant_reg_rtpd_reserves_down *= (-1)
-        q_quant_reg_rtpd_reserves = pd.DataFrame({"UP":q_quant_reg_rtpd_reserves_up,
-                                                  "DOWN":q_quant_reg_rtpd_reserves_down})
-                                                  
-        # Plot true reserves data, if provided by user
-    if true_reserves_df is not None:
-        ax.plot(true_reserves_df.index, true_reserves_df["UP"], label="CAISO's Hist Method, 2.5% to 97.5%",
-                color=E3_colors[3])
-        ax.plot(true_reserves_df.index, true_reserves_df["DOWN"], color=E3_colors[3])
-    if q_quant_reg_rtpd_reserves_df is not None:
-        ax.plot(q_quant_reg_rtpd_reserves_df.index, q_quant_reg_rtpd_reserves_df["UP"],
-                label="CAISO's Q-Regression, 2.5% to 97.5%",
-                color=E3_colors[3], linestyle="--")
-        ax.plot(q_quant_reg_rtpd_reserves_df.index, q_quant_reg_rtpd_reserves_df["DOWN"], color=E3_colors[3],
-                linestyle="--")                                              
+        other_method_reserves['down'] = -hist_rtpd_reserves.loc[eg_pred_val[foot_room_quantile], "DOWN"]
+                                                 
+    # Plot true reserves data, if provided by user
+    if plot_other_methods:
+        ax.plot(other_method_reserves.index, other_method_reserves["Up"], label="Histogram Method, 2.5%", color=E3_colors[3])
+        ax.plot(other_method_reserves.index, other_method_reserves["DOWN"],label = "Histogram Method, 97.5%" color=E3_colors[3])                                             
                                                   
     
 """
