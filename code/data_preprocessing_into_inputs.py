@@ -1,4 +1,10 @@
 # ==== TODO: Consider having option to disallow overlaps between subsequent training samples
+# ==== Change log v1.4 (4/28/2021) ====
+# Modified script to generate trainval inputs and outputs for 5 min prediction
+# Introduced a variable named lag_term_step_predictors to ensure we can sample every third RTPD term and every RTD term
+# while creating 5 min data. Also added a new RTD_Interval_ID predictor which is 0/1 or 2 based on its position within
+# a RTPD interval
+
 # ==== Change log v1.3 (1/13/2021) ====
 # Enabled script' ability to support both single and multi-objective learning
 # if the multi_obj_learning_flag is set to True, response variables will be net load, load, solar and wind forecast
@@ -31,27 +37,33 @@ import utility
 
 # ==== User inputs ====
 # the name of the model version that this data would serve
-model_name = "rescue_v1_3"
+model_name = "rescue_5_min_v1_single_obj"
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
 # E.g. 1: start = -2, end = -1 implies only include values from 2 past time steps.
 # E.g. 2: start = 0 , end = -1 implies do not include any terms for this feature.
-lag_term_start_predictors = np.array([-2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2])
-lag_term_end_predictors = np.array([1, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1])
+lag_term_start_predictors = np.array([-6, -6, -6, -6, -6, -6])
+lag_term_end_predictors = np.array([-1, 3, -1, 3, -1, 3])
+# Step size between subsequent lag terms for ML model. If 2, implies pick every 2nd lag term between start to end
+# defined above.
+# Use case-> When a 15-min predictor is just repeated thrice to get a 5-min predictor, you can pick every 3rd value
+# in that time-series to avoid redundancy
+lag_term_step_predictors = np.array([1, 3, 1, 3, 1, 3])
 # Currently, the same lead term will be applicable to each response variable, if we have several of 'em
-response_lead_term = 1  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1
+response_lead_term = 3  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1 for eg
 
 # Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
 # # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
 # that take place over time.
 longitude = -119.4179  # Roughly passing through the center of CA
 time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
+rtpd_interval = 15 # minutes
+rtd_interval = 5 # minutes
 
 # This flag should be set to True, if you want model response to be all of net load, load, solar and wind forecast
 # errors in that order. Set to False for creating a single response variable, the net load forecast error
-multi_obj_learning_flag = True
-
+multi_obj_learning_flag = False
 
 # ==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
@@ -71,17 +83,11 @@ def calculate_response_variables(raw_data_df, response_col_names):
     # to be pd.NA as well. Thus, be careful with using functions like pd.sum() which yield sum
     # of NAs to be = 0 for example.
 
-    load_forecast_error = raw_data_df["Load_RTPD_Forecast"] - \
-                          (raw_data_df["Load_RTD_1_Forecast"] + raw_data_df["Load_RTD_2_Forecast"] + \
-                           raw_data_df["Load_RTD_3_Forecast"]) / 3.0
+    load_forecast_error = raw_data_df["Load_RTPD_Forecast"] - raw_data_df["Load_RTD_Forecast"]
 
-    solar_forecast_error = raw_data_df["Solar_RTPD_Forecast"] - \
-                           (raw_data_df["Solar_RTD_1_Forecast"] + raw_data_df["Solar_RTD_2_Forecast"] + \
-                            raw_data_df["Solar_RTD_3_Forecast"]) / 3.0
+    solar_forecast_error = raw_data_df["Solar_RTPD_Forecast"] - raw_data_df["Solar_RTD_Forecast"]
 
-    wind_forecast_error = raw_data_df["Wind_RTPD_Forecast"] - \
-                          (raw_data_df["Wind_RTD_1_Forecast"] + raw_data_df["Wind_RTD_2_Forecast"] + \
-                           raw_data_df["Wind_RTD_3_Forecast"]) / 3.0
+    wind_forecast_error = raw_data_df["Wind_RTPD_Forecast"] - raw_data_df["Wind_RTD_Forecast"]
 
     net_load_forecast_error = load_forecast_error - solar_forecast_error - wind_forecast_error
 
@@ -97,7 +103,9 @@ def calculate_response_variables(raw_data_df, response_col_names):
     return response_values_df
 
 
-def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date=None):
+def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC,
+                                        rtpd_interval, rtd_interval,
+                                        start_date=None):
     """
     Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
     day angle and # of days passed since a start-date which can either be a user input or the first day in the trainval
@@ -108,12 +116,16 @@ def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference
     longitude(float): Longitude to be used to calculate local solar time in degrees. East->postive, West->Negative
     time_difference_from_from_UTC(int/float): Time-difference (in hours) between local time and
     Universal Coordinated TIme (UTC)
+    rtpd_interval(int/float) - Length of rtpd interval in min
+    rtd_interval(int/float) - Length of rtd interval in min. Will be used to assign (sub)interval ids for each rtd
+    interval comprised within a rtpd interval
     start_date(DateTime) = Unless user-specified, is set to first entry in datetime_arr
 
     Output:
     solar_hour_angle_arr (Array of floats): Hour angle in degrees for each timepoint in datetime_arr
     solar_day_angle_arr (Array of floats): Day angle in degrees for each timepoint in datetime_arr
     days_from_start_date_arr (Array of ints): Days passed since a particular start date, defined for each timepoint in datetime_arr
+    interval_id_arr (Array of ints): Equals 0, 1, 2 for the 3 RTD intervals comprised within each RTPD interval
 
     Reference for formulae:https://www.pveducation.org/pvcdrom/properties-of-sunlight/solar-time
     """
@@ -138,7 +150,14 @@ def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference
         start_date = datetime_arr[0]
     days_from_start_date_arr = (datetime_arr - start_date).days
 
-    return solar_hour_angle_arr, solar_day_angle_arr, days_from_start_date_arr
+    # Calculate rtd interval ids w.r.t each rtpd interval
+    # For eg, rtd interval starting 12:00 = 0, 12:05 = 1, 12:10 = 2, if rtpd interval spans from 12:00 to 12:15
+    interval_id_arr = np.zeros_like(datetime_arr, dtype=int)
+    for interval_id in range(int(rtpd_interval/rtd_interval)):
+        condition_arr = datetime_arr.minute % rtpd_interval == rtd_interval * interval_id
+        interval_id_arr[condition_arr] = interval_id
+
+    return solar_hour_angle_arr, solar_day_angle_arr, days_from_start_date_arr, interval_id_arr
 
 
 def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end_predictors,
@@ -183,8 +202,10 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
 
 
 def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predictors,
-         lag_term_end_predictors=lag_term_end_predictors, response_lead_term=response_lead_term,
+         lag_term_end_predictors=lag_term_end_predictors, lag_term_step_predictors=lag_term_step_predictors,
+         response_lead_term=response_lead_term,
          longitude=longitude, time_difference_from_UTC=time_difference_from_UTC,
+         rtpd_interval=rtpd_interval, rtd_interval=rtd_interval,
          multi_obj_learning_flag=multi_obj_learning_flag):
     # ==== Constants for use in script that DON'T need to be user defined ====
     # Labels for response (output(s) model is trained to predict)
@@ -201,6 +222,7 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     hour_angle_col_name = "Hour_Angle"
     day_angle_col_name = "Day_Angle"
     days_from_start_date_col_name = "Days_from_Start_Date"
+    interval_id_col_name = "5_Min_Interval_ID"
 
     # ==== 1. Reading in raw data and validate/modify the data for downstream manipulation ====
     # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
@@ -226,8 +248,9 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
 
     # ==== 2. Add in calendar terms for the raw data ====
     print("Calculating calendar-based predictors....")
-    raw_data_df[hour_angle_col_name], raw_data_df[day_angle_col_name], raw_data_df[days_from_start_date_col_name] = \
-        calculate_calendar_based_predictors(raw_data_df.index, longitude, time_difference_from_UTC, raw_data_start_date)
+    raw_data_df[hour_angle_col_name], raw_data_df[day_angle_col_name], raw_data_df[days_from_start_date_col_name], raw_data_df[interval_id_col_name] = \
+        calculate_calendar_based_predictors(raw_data_df.index, longitude, time_difference_from_UTC,
+                                            rtpd_interval, rtd_interval, raw_data_start_date)
 
     # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
     # for the raw data. These will be used as response variable(s) ====
@@ -241,6 +264,9 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
         (lag_term_start_predictors, np.ones(num_feature_ext, dtype=int) * response_lead_term))
     lag_term_end_predictors = np.hstack(
         (lag_term_end_predictors, np.ones(num_feature_ext, dtype=int) * response_lead_term))
+    # We are going from T0 to prediction time in 1 step
+    lag_term_step_predictors = np.hstack(
+        (lag_term_step_predictors, np.ones(num_feature_ext, dtype=int) * 1))
 
     # ==== 4. Using vectorized operations to construct lag terms ====
     print("Creating trainval samples for all time-points ....")
@@ -251,12 +277,13 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # Iterate over each type of lag term predictor
     for feature_idx, feature_type in enumerate(raw_data_df.columns):
 
-        # obtain lag term start and end offset for a certain feature
+        # obtain lag term start and end offset, as well as step size for a certain feature
         lag_term_start = lag_term_start_predictors[feature_idx]
         lag_term_end = lag_term_end_predictors[feature_idx]
+        lag_term_step = lag_term_step_predictors[feature_idx]
 
         # Iterate over each time step for current predictor type
-        for time_step in range(lag_term_start, lag_term_end + 1):
+        for time_step in range(lag_term_start, lag_term_end + 1, lag_term_step):
             label = "{}_T{:+}".format(feature_type, time_step)
             trainval_data_df[label] = (raw_data_df[feature_type]
                                        .iloc[raw_data_start_idx + time_step: raw_data_end_idx + time_step].values)
