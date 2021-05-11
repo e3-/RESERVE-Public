@@ -40,7 +40,9 @@ model_name = "rescue_v1_3"
 lag_term_start_predictors = np.array([-2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2, -2])
 lag_term_end_predictors = np.array([1, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1])
 # Currently, the same lead term will be applicable to each response variable, if we have several of 'em
-response_lead_term = 1  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1
+response_lead_term = (
+    1  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1
+)
 
 # Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
 # # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
@@ -65,25 +67,47 @@ def calculate_response_variables(raw_data_df, response_col_names):
     with the response variable(s) calculated
     """
     # Initialize df to store response variable(s)
-    response_values_df = pd.DataFrame(index=raw_data_df.index, columns=response_col_names)
+    response_values_df = pd.DataFrame(
+        index=raw_data_df.index, columns=response_col_names
+    )
     # Fill it in per user provided definition of the response variable(s)
     # NOTE: When a response is calculated using a predictor that was pd.NA, you want the response
     # to be pd.NA as well. Thus, be careful with using functions like pd.sum() which yield sum
     # of NAs to be = 0 for example.
 
-    load_forecast_error = raw_data_df["Load_RTPD_Forecast"] - \
-                          (raw_data_df["Load_RTD_1_Forecast"] + raw_data_df["Load_RTD_2_Forecast"] + \
-                           raw_data_df["Load_RTD_3_Forecast"]) / 3.0
+    load_forecast_error = (
+        raw_data_df["Load_RTPD_Forecast"]
+        - (
+            raw_data_df["Load_RTD_1_Forecast"]
+            + raw_data_df["Load_RTD_2_Forecast"]
+            + raw_data_df["Load_RTD_3_Forecast"]
+        )
+        / 3.0
+    )
 
-    solar_forecast_error = raw_data_df["Solar_RTPD_Forecast"] - \
-                           (raw_data_df["Solar_RTD_1_Forecast"] + raw_data_df["Solar_RTD_2_Forecast"] + \
-                            raw_data_df["Solar_RTD_3_Forecast"]) / 3.0
+    solar_forecast_error = (
+        raw_data_df["Solar_RTPD_Forecast"]
+        - (
+            raw_data_df["Solar_RTD_1_Forecast"]
+            + raw_data_df["Solar_RTD_2_Forecast"]
+            + raw_data_df["Solar_RTD_3_Forecast"]
+        )
+        / 3.0
+    )
 
-    wind_forecast_error = raw_data_df["Wind_RTPD_Forecast"] - \
-                          (raw_data_df["Wind_RTD_1_Forecast"] + raw_data_df["Wind_RTD_2_Forecast"] + \
-                           raw_data_df["Wind_RTD_3_Forecast"]) / 3.0
+    wind_forecast_error = (
+        raw_data_df["Wind_RTPD_Forecast"]
+        - (
+            raw_data_df["Wind_RTD_1_Forecast"]
+            + raw_data_df["Wind_RTD_2_Forecast"]
+            + raw_data_df["Wind_RTD_3_Forecast"]
+        )
+        / 3.0
+    )
 
-    net_load_forecast_error = load_forecast_error - solar_forecast_error - wind_forecast_error
+    net_load_forecast_error = (
+        load_forecast_error - solar_forecast_error - wind_forecast_error
+    )
 
     # Net load forecast error will be the sole response in single objective learning
     response_values_df.loc[:, "Net_Load_Forecast_Error"] = net_load_forecast_error
@@ -97,7 +121,9 @@ def calculate_response_variables(raw_data_df, response_col_names):
     return response_values_df
 
 
-def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference_from_UTC, start_date=None):
+def calculate_calendar_based_predictors(
+    datetime_arr, longitude, time_difference_from_UTC, start_date=None
+):
     """
     Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
     day angle and # of days passed since a start-date which can either be a user input or the first day in the trainval
@@ -122,14 +148,19 @@ def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference
     # Equation of time (EoT) corrects for eccentricity of earth's orbit and axial tilt
     solar_day_angle_arr = (360 / 365) * (day_of_year_arr - 81)  # degrees
     solar_day_angle_in_radians_arr = np.deg2rad(solar_day_angle_arr)  # radians
-    EoT_arr = 9.87 * np.sin(2 * solar_day_angle_in_radians_arr) - 7.53 * np.cos(
-        solar_day_angle_in_radians_arr) - 1.5 * np.sin(solar_day_angle_in_radians_arr)  # minutes
+    EoT_arr = (
+        9.87 * np.sin(2 * solar_day_angle_in_radians_arr)
+        - 7.53 * np.cos(solar_day_angle_in_radians_arr)
+        - 1.5 * np.sin(solar_day_angle_in_radians_arr)
+    )  # minutes
     # Time correction sums up time difference due to EoT and longitudinal difference between local time
     # zone and local longitude
     local_std_time_meridian = 15 * time_difference_from_UTC  # degrees
     time_correction_arr = 4 * (longitude - local_std_time_meridian) + EoT_arr  # minutes
     # Calculate local solar time using local time and time correction calculated above
-    local_solar_time_arr = datetime_arr.hour + (datetime_arr.minute / 60) + (time_correction_arr / 60)  # hours
+    local_solar_time_arr = (
+        datetime_arr.hour + (datetime_arr.minute / 60) + (time_correction_arr / 60)
+    )  # hours
     # Calculate solar hour angle corresponding to the local solar time
     solar_hour_angle_arr = 15 * (local_solar_time_arr - 12)  # degrees
 
@@ -141,24 +172,25 @@ def calculate_calendar_based_predictors(datetime_arr, longitude, time_difference
     return solar_hour_angle_arr, solar_day_angle_arr, days_from_start_date_arr
 
 
-def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end_predictors,
-                            response_lead_term):
-    '''
+def pad_raw_data_w_lag_lead(
+    raw_data_df, lag_term_start_predictors, lag_term_end_predictors, response_lead_term
+):
+    """
     A function to pad the raw data files in both the lag (backwards) and the lead (forwards) direction
     As the lag terms used in input downstream make use of vectorized calculation. A uniform padding allows
-    easier manipulation of the data and constant dataframe size. 
-    
-    Input: 
+    easier manipulation of the data and constant dataframe size.
+
+    Input:
     raw_data_df: original raw data dataframe
     lag_term_start_predictors: the start of the lag terms for the predictors/features
-    lag_term_end_predictors: the end of the lag terms used as the predictors/features 
+    lag_term_end_predictors: the end of the lag terms used as the predictors/features
     response_lead_term: the amount of lead time (expressed in interval) for the response variable
-    
+
     Output:
     raw_data_df: The origianal raw data dataframe padded with enough NaNs in lag and lead direction
     raw_data_start_idx: in the now padded dataframe, where does the raw data actually start
     raw_data_end_idx: in the now padded dataframe, where does the raw data actually ends
-    '''
+    """
 
     # Calculate the maximum amount of lag and lead to determine length of padding
     raw_data_start_time, raw_data_end_time = raw_data_df.index[0], raw_data_df.index[-1]
@@ -167,33 +199,53 @@ def pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors, lag_term_end
 
     # Discern the raw data's inherent frequency. If it's inconsistent then all is moot.
     raw_data_freq = pd.infer_freq(raw_data_df.index)
-    assert raw_data_freq is not None, "Raw data does not have equally spaced index! Cannot discern Frequency!"
+    assert (
+        raw_data_freq is not None
+    ), "Raw data does not have equally spaced index! Cannot discern Frequency!"
     # Create padding for lag and lead terms
     lag_terms_timeshift = np.arange(max_num_lag_terms, 0) * pd.Timedelta(raw_data_freq)
-    lead_terms_timeshift = np.arange(1, max_num_lead_terms + 1) * pd.Timedelta(raw_data_freq)
-    raw_data_lag_pad = pd.DataFrame(index=raw_data_start_time + lag_terms_timeshift, columns=raw_data_df.columns)
-    raw_data_lead_pad = pd.DataFrame(index=raw_data_end_time + lead_terms_timeshift, columns=raw_data_df.columns)
+    lead_terms_timeshift = np.arange(1, max_num_lead_terms + 1) * pd.Timedelta(
+        raw_data_freq
+    )
+    raw_data_lag_pad = pd.DataFrame(
+        index=raw_data_start_time + lag_terms_timeshift, columns=raw_data_df.columns
+    )
+    raw_data_lead_pad = pd.DataFrame(
+        index=raw_data_end_time + lead_terms_timeshift, columns=raw_data_df.columns
+    )
 
     # Append the padding to the raw data frame
     raw_data_df = pd.concat([raw_data_lag_pad, raw_data_df, raw_data_lead_pad])
     # calculate the start and end idx of the raw_data in the padded dataframe
-    raw_data_start_idx, raw_data_end_idx = -max_num_lag_terms, raw_data_df.shape[0] - max_num_lead_terms
+    raw_data_start_idx, raw_data_end_idx = (
+        -max_num_lag_terms,
+        raw_data_df.shape[0] - max_num_lead_terms,
+    )
 
     return raw_data_df, raw_data_start_idx, raw_data_end_idx
 
 
-def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predictors,
-         lag_term_end_predictors=lag_term_end_predictors, response_lead_term=response_lead_term,
-         longitude=longitude, time_difference_from_UTC=time_difference_from_UTC,
-         multi_obj_learning_flag=multi_obj_learning_flag):
+def main(
+    model_name=model_name,
+    lag_term_start_predictors=lag_term_start_predictors,
+    lag_term_end_predictors=lag_term_end_predictors,
+    response_lead_term=response_lead_term,
+    longitude=longitude,
+    time_difference_from_UTC=time_difference_from_UTC,
+    multi_obj_learning_flag=multi_obj_learning_flag,
+):
     # ==== Constants for use in script that DON'T need to be user defined ====
     # Labels for response (output(s) model is trained to predict)
     if multi_obj_learning_flag:
         # You can change these labels, but the order MUST be net load->load->solar->wind
         # To change order or add/remove any response variables, you will need to change the function
         # calculate_response_variables too
-        response_col_names = ["Net_Load_Forecast_Error", "Load_Forecast_Error", "Solar_Forecast_Error",
-                              "Wind_Forecast_Error"]
+        response_col_names = [
+            "Net_Load_Forecast_Error",
+            "Load_Forecast_Error",
+            "Solar_Forecast_Error",
+            "Wind_Forecast_Error",
+        ]
     else:
         response_col_names = ["Net_Load_Forecast_Error"]
 
@@ -207,27 +259,45 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     dir_str = utility.Dir_Structure(model_name=model_name)
 
     # Read in raw data to be used to create predictors and response variables
-    raw_data_df = pd.read_csv(dir_str.raw_data_path, index_col=0, parse_dates=True, infer_datetime_format=True)
-    raw_data_validity = pd.read_csv(dir_str.raw_data_validity_path, index_col=0, parse_dates=True,
-                                    infer_datetime_format=True)
+    raw_data_df = pd.read_csv(
+        dir_str.raw_data_path, index_col=0, parse_dates=True, infer_datetime_format=True
+    )
+    raw_data_validity = pd.read_csv(
+        dir_str.raw_data_validity_path,
+        index_col=0,
+        parse_dates=True,
+        infer_datetime_format=True,
+    )
 
     # Check the validity mask of the raw data is consistent with data's shape
-    assert (raw_data_df.index == raw_data_validity.index).all(), "Validity mask and Data index inconsistent!"
-    assert (raw_data_df.columns == raw_data_validity.columns).all(), "Validity mask and Data fields inconsistent!"
+    assert (
+        raw_data_df.index == raw_data_validity.index
+    ).all(), "Validity mask and Data index inconsistent!"
+    assert (
+        raw_data_df.columns == raw_data_validity.columns
+    ).all(), "Validity mask and Data fields inconsistent!"
 
     # Embed info about validity into df holding values so we can use the latter alone going forward
     raw_data_df[~raw_data_validity] = None
 
     # Pad the raw data with NaNs in both the lag and lead direction for downstream data manipulation
-    raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(raw_data_df, lag_term_start_predictors,
-                                                                                lag_term_end_predictors,
-                                                                                response_lead_term)
+    raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(
+        raw_data_df,
+        lag_term_start_predictors,
+        lag_term_end_predictors,
+        response_lead_term,
+    )
     raw_data_start_date = raw_data_df.index[raw_data_start_idx]
 
     # ==== 2. Add in calendar terms for the raw data ====
     print("Calculating calendar-based predictors....")
-    raw_data_df[hour_angle_col_name], raw_data_df[day_angle_col_name], raw_data_df[days_from_start_date_col_name] = \
-        calculate_calendar_based_predictors(raw_data_df.index, longitude, time_difference_from_UTC, raw_data_start_date)
+    (
+        raw_data_df[hour_angle_col_name],
+        raw_data_df[day_angle_col_name],
+        raw_data_df[days_from_start_date_col_name],
+    ) = calculate_calendar_based_predictors(
+        raw_data_df.index, longitude, time_difference_from_UTC, raw_data_start_date
+    )
 
     # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
     # for the raw data. These will be used as response variable(s) ====
@@ -238,14 +308,24 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
     # Revise the lag term array since we are extending the original data
     num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
     lag_term_start_predictors = np.hstack(
-        (lag_term_start_predictors, np.ones(num_feature_ext, dtype=int) * response_lead_term))
+        (
+            lag_term_start_predictors,
+            np.ones(num_feature_ext, dtype=int) * response_lead_term,
+        )
+    )
     lag_term_end_predictors = np.hstack(
-        (lag_term_end_predictors, np.ones(num_feature_ext, dtype=int) * response_lead_term))
+        (
+            lag_term_end_predictors,
+            np.ones(num_feature_ext, dtype=int) * response_lead_term,
+        )
+    )
 
     # ==== 4. Using vectorized operations to construct lag terms ====
     print("Creating trainval samples for all time-points ....")
     # Initialize collectors to hold (and later save) trainval data in
-    trainval_data_df = pd.DataFrame(None, index=raw_data_df.index[raw_data_start_idx:raw_data_end_idx])
+    trainval_data_df = pd.DataFrame(
+        None, index=raw_data_df.index[raw_data_start_idx:raw_data_end_idx]
+    )
 
     # Collect lag term predictors for all trainval samples
     # Iterate over each type of lag term predictor
@@ -258,20 +338,28 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
         # Iterate over each time step for current predictor type
         for time_step in range(lag_term_start, lag_term_end + 1):
             label = "{}_T{:+}".format(feature_type, time_step)
-            trainval_data_df[label] = (raw_data_df[feature_type]
-                                       .iloc[raw_data_start_idx + time_step: raw_data_end_idx + time_step].values)
+            trainval_data_df[label] = (
+                raw_data_df[feature_type]
+                .iloc[raw_data_start_idx + time_step : raw_data_end_idx + time_step]
+                .values
+            )
 
     # ==== 5. Drop invalid terms and store to hard drive ====
     # Identify trainval samples wherein all lag term of features and responses are valid
     # If any entry is pd.NA, it is invalid
-    print("{} of {} trainval samples are valid"
-          .format(trainval_data_df.notna().all(axis=1).sum(), trainval_data_df.shape[0]))
+    print(
+        "{} of {} trainval samples are valid".format(
+            trainval_data_df.notna().all(axis=1).sum(), trainval_data_df.shape[0]
+        )
+    )
     print("Proceeding to delete the rest....")
     # Only retain trainval samples wherein predictor(s) and response(s) are both valid
     trainval_data_df = trainval_data_df.dropna()
 
     # Separate predictors (model inputs) from response (model output(s))
-    response_col_names = ["{}_T{:+}".format(name,response_lead_term) for name in response_col_names ]
+    response_col_names = [
+        "{}_T{:+}".format(name, response_lead_term) for name in response_col_names
+    ]
     trainval_outputs_df = trainval_data_df.loc[:, response_col_names].copy()
     trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
 
@@ -283,5 +371,5 @@ def main(model_name=model_name, lag_term_start_predictors=lag_term_start_predict
 
 
 # run as a script
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
