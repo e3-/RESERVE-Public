@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import os
 
 # ==== Constants ====
 E3_COLORS = [
@@ -63,20 +64,15 @@ def plot_comparative_data(comp_pred_df, comp_name, fig, ax, color_idx=2):
     return fig, ax
 
 
-def overlay_comparative_methods(
-    comparative_reserves, feature_discretized, fig, ax, color_idx_init=2
-):
+def overlay_comparative_methods(comparative_reserves, fig, ax):
     """"""
     # Overlay the prediction from other models if wanted and approriate
     for i, comp_name in enumerate(comparative_reserves.keys()):
-        color_idx = color_idx_init + i
+        color_idx = 2 + i
         reserve = comparative_reserves[comp_name]
-        # Group reserves from comparative methods  based on discretized input variable
-        reserve_groupedby_input = reserve.groupby(feature_discretized.values).mean()
+
         # Plot model predictions at all target quantiles
-        fig, ax = plot_comparative_data(
-            reserve_groupedby_input, comp_name, fig, ax, color_idx
-        )
+        fig, ax = plot_comparative_data(reserve, comp_name, fig, ax, color_idx)
 
     return fig, ax
 
@@ -137,40 +133,39 @@ def find_coincident_dt(df, master_df):
     return datetimes_df
 
 
-def plot_coincident_quantile_comp(
-    pred_trainval, quantiles_list, response_label, trainval_outputs
-):
+def plot_coincident_quantile_comp(pred_val, output_val, response_label, quantiles_list):
     """
     Plot the the model predictions and the ground truth for points that lie at the very edge of the desired prediction
     interval in each hour. True reserves held can be overlaid on top for comparison with model predicted reserves if
     provided by user.
-    :param pred_trainval: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
+    :param pred_val: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
     of different forecast quantiles
-    :param quantiles_list: The list of quantiles that will be extracted from both historical data and model predictions
-    :param response_label: str,name of the output variable for use in labeling
-    :param trainval_outputs: pd.Series (N,1), N being the number of samples. Contains the ground truth the model was
+    :param output_val: pd.Series (N,1), N being the number of samples. Contains the ground truth the model was
     trained to predict
+    :param response_label: str,name of the output variable for use in labeling
+    :param quantiles_list: The list of quantiles that will be extracted from both historical data and model predictions
+
 
     :return fig, axarr: matplotlib Fig and axes array that contains the finished plots
     """
 
     # Most of the time the data is binned by hour.
-    input_var_discretized = trainval_outputs.index.hour
+    input_var_discretized = output_val.index.hour
 
     # Identify among the historical forecast errors, which data point was at the user defined quantile(s).
     # We use the data point that's closest to the required quantile. E.g. If there are 100 points and 2.5%
     # is required, we'll settle for the 2nd or 3rd point.
-    truth_quantiles = trainval_outputs.groupby(input_var_discretized).quantile(
+    truth_quantiles = output_val.groupby(input_var_discretized).quantile(
         quantiles_list, interpolation="nearest"
     )
     truth_quantiles = truth_quantiles.unstack()
 
     # Find datetimes corresponding to these forecast error quantiles. Find model prediction coincident with
     # these datetimes.
-    coincident_dt = find_coincident_dt(truth_quantiles, trainval_outputs)
+    coincident_dt = find_coincident_dt(truth_quantiles, output_val)
     pred_quantiles = truth_quantiles.copy() * 0
     for PI in quantiles_list:
-        pred_quantiles[PI] = pred_trainval.loc[coincident_dt[PI], PI].values
+        pred_quantiles[PI] = pred_val.loc[coincident_dt[PI], PI].values
 
     # Plot the true forecast errors, coincident model predictions and coincident FRP reserves, if applicable
     fig, ax = plt.subplots()
@@ -194,30 +189,30 @@ def plot_coincident_quantile_comp(
 
 
 def plot_uncertainty_groupedby_feature(
-    pred_trainval, input_var_discretized, input_var_name, response_label
+    pred_val, output_val, response_label, input_var_discretized, input_var_name
 ):
     """
     Plot the bias (bottom panel) and uncertainty (top panel )grouped by a certain input feature.
     The input feature must take discreet value for the groupedby function to work properly
-    :param pred_trainval: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
+    :param pred_val: Quantile predictions dataframe (N,M). N being the number of samples, M being the number
     of different forecast quantiles
+    :param output_val: pd.Series (N,1), N being the number of samples. Contains the ground truth the model was
+    trained to predict
+    :param response_label: str ,name of the output variable for use in labeling
     :param input_var_discretized: The input feature array (N,1) used for grouping. Must be discrete values.
     :param input_var_name: str, name of the input variable for use in labeling
-    :param response_label: str ,name of the output variable for use in labeling
     :return fig, axarr: matplotlib Fig and axes array that contained the finished plots
 
     """
 
     # Group model predictions and ground truth  based on discretized input variable
-    pred_trainval_groupedby_input = pred_trainval.groupby(
-        input_var_discretized.values
-    ).mean()
+    pred_val_groupedby_input = pred_val.groupby(input_var_discretized.values).mean()
 
     # Prepare ax array
     fig, ax = plt.subplots()
 
     # Plot model predictions at all target quantiles
-    fig, ax = plot_model_predictions(pred_trainval_groupedby_input, fig, ax)
+    fig, ax = plot_model_predictions(pred_val_groupedby_input, fig, ax)
 
     # set labels and legends
     ax.set_ylabel("Quantile of Forecast Err (MW)")
@@ -355,53 +350,81 @@ def plot_compare_train_val(
     return fig, axarr
 
 
-def plot_example_ts(ts_ranges, pred_trainval, output_trainval, response_label):
+def plot_example_ts(pred_val, output_val, response_label, ts_range):
     """
     Visualize the example periods of time, with the true errors and different quantile forecasts.
-    :param ts_ranges: A list of periods to plot. Each element must be valid index for a pd.datetimeindex.
-    :param pred_trainval: pd dataframe of (num_samples, num_PIs). A record of quantile forecast for all training samples
-    :param output_trainval: pd dataframe of (num_samples, 1). True forecast errors for all training samples
+
+    :param pred_val: pd dataframe of (num_samples, num_PIs). A record of quantile forecast for all training samples
+    :param output_val: pd dataframe of (num_samples, 1). True forecast errors for all training samples
     :param response_label: str, name of the output variable for use in labeling
+    :param ts_range: A list of periods to plot. Each element must be valid index for a pd.datetimeindex.
     :return fig, axarr: Finished plots of the example timeseries. Different periods are in its own panel.
     """
-    fig, axarr = plt.subplots(len(ts_ranges), 1, sharey=True)
+    fig, ax = plt.subplots()
 
-    # cycle through the example time series that needs to be plotted
-    for i, ts_range in enumerate(ts_ranges):
-        # plot true response and median forecast
-        axarr[i].plot(
-            output_trainval.loc[ts_range],
-            color=E3_COLORS[1],
-            label="True Forecast Error",
-        )
-        axarr[i].plot(
-            pred_trainval.loc[ts_range, MEDIAN],
-            color=E3_COLORS[0],
-            dashes=[2, 2],
-            label="Median bias - 50%",
-        )
+    # plot model predictions at each target quantile
+    fig, ax = plot_model_predictions(pred_val.loc[ts_range], fig, ax)
 
-        # plot model predictions at each target quantile
-        fig, axarr[i] = plot_model_predictions(
-            pred_trainval.loc[ts_range], fig, axarr[i]
-        )
+    # Plot historical forecast errors
+    ax.plot(
+        output_val.loc[ts_range],
+        color=E3_COLORS[2],
+        dashes=[2, 2],
+        label="Historical Error",
+    )
 
-        # Mark the date of this series.
-        axarr[i].text(
-            0.05,
-            0.85,
-            pd.Timestamp(ts_range).strftime("%x"),
-            transform=axarr[i].transAxes,
-        )
-        axarr[i].set_ylabel(response_label + " Forecast Error (MW)")
-        axarr[i].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        axarr[i].legend(loc="center left", bbox_to_anchor=[1, 0.5], frameon=False)
+    # Mark the date of this series.
+    ax.text(0.05, 0.85, pd.Timestamp(ts_range).strftime("%x"), transform=ax.transAxes)
+
+    ax.set_ylabel(response_label + " Forecast Error (MW)")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
     # sizing and general formatting.
-    fig.set_size_inches(9, 3 * len(ts_ranges))
     fig.tight_layout()
 
-    return fig, axarr
+    return fig, ax
+
+
+def loop_thru_responses(
+    plot_fn,
+    title_fn,
+    pred_val,
+    output_trainval,
+    label_to_response_map,
+    plot_dir,
+    is_plotting_comparative_methods=True,
+    comparative_reserves=None,
+):
+    """"""
+
+    # Plotting the uncertainty (of each model output) and bias for each feature bin
+    for response, response_label in label_to_response_map.items():
+        # extract information for the current response from RESCUE prediction and outputs.
+        pred_val_for_current_response = pred_val.xs(
+            key=response, axis=1, level="Output_Name"
+        )
+        val_outputs_current_response = output_trainval[response]
+
+        # Make plot with chosen specifications
+        fig, ax = plot_fn(
+            pred_val_for_current_response, val_outputs_current_response, response_label
+        )
+
+        # Overlay the other outputs from comparative methods
+        if response_label == "Net Load" and is_plotting_comparative_methods:
+            fig, ax = overlay_comparative_methods(comparative_reserves, fig, ax)
+
+        # put the legend on the plots. This should almost always be the last visual element plotted
+        ax.legend(frameon=False, loc="center left", bbox_to_anchor=[1, 0.5])
+
+        # Save fig
+        fig.savefig(
+            os.path.join(plot_dir, title_fn(response_label)), bbox_inches="tight"
+        )
+        plt.show(fig)
+        plt.close(fig)
+
+    return fig, ax
 
 
 # ==== Unused/Archived diagnostics/plots ====
