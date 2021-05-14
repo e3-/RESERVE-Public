@@ -271,7 +271,7 @@ def compute_metrics_for_all_taus(
 
     metrics_value_df = None
 
-    for tau in pred_trainval.columns.levels[0]:
+    for tau in pre9d_trainval.columns.levels[0]:
         metrics_value_df = compute_metrics_for_specified_tau(
             output_trainval,
             pred_trainval,
