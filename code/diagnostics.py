@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 
+import cross_val
+import utility
+import metrics
+
 # ==== Constants ====
 E3_COLORS = [
     [3, 78, 110],
@@ -426,6 +430,139 @@ def loop_thru_responses(
 
     return fig, ax
 
+# ==== Pareto plots/functions ====
+def get_model_data_dict(models_to_compare, metrics_to_compare=['coverage', 'requirement', 'pinball_loss']):
+    # Get pred_trainval, output_trainval, and val_masks_all_folds for all models
+    model_data_dict = {model_name: {} for model_name in models_to_compare}
+    for model_name in models_to_compare:
+
+        # Load in/ Create folder structure for the current model
+        dir_str = utility.Dir_Structure(model_name=model_name)
+
+        # Read in predictions, targets, and validation masks for the current model
+        pred_trainval = pd.read_pickle(dir_str.pred_trainval_path)
+        output_trainval = pd.read_pickle(dir_str.output_trainval_path)
+        num_cv_folds = len(pred_trainval.columns.levels[1])
+        val_masks_all_folds = cross_val.get_CV_masks(output_trainval.index, num_cv_folds, dir_str.shuffled_indices_path)
+
+        # Save to data dictionary
+        model_data_dict[model_name]['pred'] = pred_trainval
+        model_data_dict[model_name]['output'] = output_trainval
+        model_data_dict[model_name]['masks'] = val_masks_all_folds
+
+        # Get CV fold metrics; passing "val_masks_all_folds" will compute metrics only on validation set data
+        df_metrics = metrics.compute_metrics_for_all_taus(output_trainval,
+                                                          pred_trainval,
+                                                          val_masks=val_masks_all_folds,
+                                                          dir_str=dir_str,
+                                                          avg_across_folds=False)
+
+        # Get target metrics for net load forecast error in particular
+        for metric in metrics_to_compare:
+            df = pd.DataFrame(index=df_metrics.columns.levels[0], columns=df_metrics.columns.levels[1])
+            for tau in df_metrics.columns.levels[0]:
+                for CV_fold in df_metrics.columns.levels[1]:
+                    df.loc[tau, CV_fold] = df_metrics.loc[metric, (tau, CV_fold, 'Net_Load_Forecast_Error_T+1')]
+
+            # Save to data dictionary
+            model_data_dict[model_name][metric] = df
+
+    return model_data_dict
+
+
+def plot_coverage_variance_vs_requirement(models_to_compare):
+    # Get model_data_dict
+    model_data_dict = get_model_data_dict(models_to_compare)
+
+    # Average deviation of coverage from target vs. requirement
+    for model_name in models_to_compare:
+        # Get average deviation of coverage from target (tau)
+        coverage_data = model_data_dict[model_name]['coverage']
+        coverage_deviation = pd.Series(index=coverage_data.index, dtype=float)
+        for tau in coverage_data.index:
+            coverage_tau = coverage_data.loc[tau]
+            coverage_deviation.loc[tau] = np.sqrt(((coverage_tau - tau) ** 2).mean())
+        # Get requirement and average over CV folds
+        requirement = model_data_dict[model_name]['requirement'].mean(axis=1)
+        # Plot
+        plt.plot(requirement, 100 * coverage_deviation, linewidth=0.8)
+        plt.scatter(requirement, 100 * coverage_deviation, alpha=0.7, label=model_name)
+
+        # Add tau annotations
+        tau_values = model_data_dict[model_name]['coverage'].index  # Get tau values
+        for i in range(len(tau_values)):
+            plt.text(requirement.iloc[i], 100 * coverage_deviation.iloc[i], tau_values[i], fontdict={'size': 7})
+
+    axes = plt.gca()  # Get axes of graph
+    x_min, x_max = axes.get_xlim()
+    y_min, y_max = axes.get_ylim()
+
+    # Plot desired direction for axes
+    # x-axis arrow(s)
+    plt.arrow(-0.2 * (x_max - x_min), y_min, 0.1 * (x_max - x_min), 0, head_width=0.05 * (y_max - y_min),
+              head_length=0.05 * (x_max - x_min))
+    plt.arrow(0.2 * (x_max - x_min), y_min, -0.1 * (x_max - x_min), 0, head_width=0.05 * (y_max - y_min),
+              head_length=0.05 * (x_max - x_min))
+    # y-axis arrow
+    plt.arrow(x_min, 0.5 * (y_min + y_max), 0, -0.1 * (y_max - y_min), head_width=0.05 * (x_max - x_min),
+              head_length=0.05 * (y_max - y_min))
+
+    # Add labels/formatting
+    plt.xlabel('Requirement (MW)')
+    plt.ylabel('Coverage Deviation (%)')
+    plt.legend()
+    plt.show()
+
+
+def plot_pinball_loss_variance_vs_pinball_loss(models_to_compare):
+    # Get model_data_dict
+    model_data_dict = get_model_data_dict(models_to_compare)
+
+    # Iterate through tau <= 0.5 and tau >= 0.5
+    for k in range(2):
+
+        # Create subplot
+        plt.subplot(1, 2, k + 1)
+
+        # Standard deviation of pinball loss vs. pinball loss
+        for model_name in models_to_compare:
+
+            # Get tau values
+            tau_values = model_data_dict[model_name]['pinball_loss'].index
+            tau_values = [t for t in tau_values if t >= k * 0.5 and t <= (k + 1) * 0.5]
+
+            # Get pinball loss and average over CV folds
+            loss = model_data_dict[model_name]['pinball_loss'].loc[tau_values].mean(axis=1)
+
+            # Get requirement and average over CV folds
+            loss_deviation = model_data_dict[model_name]['pinball_loss'].loc[tau_values].std(axis=1)
+
+            # Plot
+            plt.plot(loss, loss_deviation, alpha=0.7, linewidth=0.8)
+            plt.scatter(loss, loss_deviation, alpha=0.7, label=model_name)
+
+            # Add tau annotations
+            for i in range(len(tau_values)):
+                plt.text(loss.iloc[i], loss_deviation.iloc[i], tau_values[i], fontdict={'size': 7})
+
+        axes = plt.gca()  # Get axes of graph
+        x_min, x_max = axes.get_xlim()
+        y_min, y_max = axes.get_ylim()
+
+        # Plot desired direction for axes
+        # x-axis arrow
+        plt.arrow(0.5 * (x_min + x_max), y_min, -0.1 * (x_max - x_min), 0, head_width=0.05 * (y_max - y_min),
+                  head_length=0.05 * (x_max - x_min))
+        # y-axis arrow
+        plt.arrow(x_min, 0.5 * (y_min + y_max), 0, -0.1 * (y_max - y_min), head_width=0.05 * (x_max - x_min),
+                  head_length=0.05 * (y_max - y_min))
+
+        plt.xlabel('Pinball Loss (MW)')
+        plt.ylabel('Pinball Loss Std. Dev. (MW)')
+        plt.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.show()
 
 # ==== Unused/Archived diagnostics/plots ====
 
