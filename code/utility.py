@@ -17,12 +17,15 @@ class Dir_Structure:
         # Define paths to directories
         self.par_dir = os.path.dirname(self.code_dir)  # parent directory
         self.raw_data_dir = os.path.join(self.par_dir, "data", "raw_data")
+        self.data_checker_dir = os.path.join(
+            self.par_dir, "data_checker_outputs"
+        )  # stores data checker outputs
         self.data_dir = os.path.join(
             self.par_dir, "data", self.model_name
         )  # stores data/input
         self.output_dir = os.path.join(
             self.par_dir, "output", self.model_name
-        )  # stores inferrence results
+        )  # stores inference results
         self.logs_dir = os.path.join(
             self.par_dir, "logs", self.model_name
         )  # training log for tensorboard
