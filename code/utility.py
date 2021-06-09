@@ -48,12 +48,6 @@ class Dir_Structure:
         )
         self.input_trainval_path = os.path.join(self.data_dir, "input_trainval.pkl")
         self.output_trainval_path = os.path.join(self.data_dir, "output_trainval.pkl")
-        self.raw_data_path = os.path.join(
-            self.raw_data_dir, "input_values_for_M_by_N_creating_script.csv"
-        )
-        self.raw_data_validity_path = os.path.join(
-            self.raw_data_dir, "input_validity_flags_for_M_by_N_creating_script.csv"
-        )
         self.pred_trainval_path = os.path.join(self.output_dir, "pred_trainval.pkl")
         self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
         self.metrics_path = os.path.join(self.diag_dir, "metrics.npy")
