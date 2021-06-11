@@ -432,13 +432,24 @@ def loop_thru_responses(
 
 
 # ==== Pareto plots/functions ====
-def get_model_data_dict(
-    models_to_compare, metrics_to_compare=["coverage", "requirement", "pinball_loss"]
-):
-    # Get pred_trainval, output_trainval, and val_masks_all_folds for all models
-    model_data_dict = {model_name: {} for model_name in models_to_compare}
-    for model_name in models_to_compare:
 
+
+def plot_pareto_fronts(x_values, y_values, model_name, ax):
+    ax.plot(x_values, y_values, alpha=0.7, linewidth=0.8, marker="o", label=model_name)
+
+    # Add tau annotations
+    for tau in x_values.index:
+        ax.text(x_values.loc[tau], y_values.loc[tau], tau)
+
+    return ax
+
+
+def get_multiple_model_metrics(models_to_compare, output_for_pareto_comp):
+
+    # Get pred_trainval, output_trainval, and val_masks_all_folds for all models
+    model_metrics = {}
+    for model_name in models_to_compare:
+        print("Calculating metrics for ", model_name)
         # Load in/ Create folder structure for the current model
         dir_str = utility.Dir_Structure(model_name=model_name)
 
@@ -450,11 +461,6 @@ def get_model_data_dict(
             output_trainval.index, num_cv_folds, dir_str.shuffled_indices_path
         )
 
-        # Save to data dictionary
-        model_data_dict[model_name]["pred"] = pred_trainval
-        model_data_dict[model_name]["output"] = output_trainval
-        model_data_dict[model_name]["masks"] = val_masks_all_folds
-
         # Get CV fold metrics; passing "val_masks_all_folds" will compute metrics only on validation set data
         df_metrics = metrics.compute_metrics_for_all_taus(
             output_trainval,
@@ -464,160 +470,99 @@ def get_model_data_dict(
             avg_across_folds=False,
         )
 
-        # Get target metrics for net load forecast error in particular
-        for metric in metrics_to_compare:
-            df = pd.DataFrame(
-                index=df_metrics.columns.levels[0], columns=df_metrics.columns.levels[1]
-            )
-            for tau in df_metrics.columns.levels[0]:
-                for CV_fold in df_metrics.columns.levels[1]:
-                    df.loc[tau, CV_fold] = df_metrics.loc[
-                        metric, (tau, CV_fold, "Net_Load_Forecast_Error_T+1")
-                    ]
+        model_metrics[model_name] = (
+            df_metrics.xs(output_for_pareto_comp, level="Output_Name", axis=1)
+            .copy()
+            .astype("float")
+        )
 
-            # Save to data dictionary
-            model_data_dict[model_name][metric] = df
-
-    return model_data_dict
+    return model_metrics
 
 
-def plot_coverage_variance_vs_requirement(models_to_compare):
-    # Get model_data_dict
-    model_data_dict = get_model_data_dict(models_to_compare)
+def plot_pareto_coverage_rmse_vs_req(model_metrics):
+
+    fig, ax = plt.subplots()
 
     # Average deviation of coverage from target vs. requirement
-    for model_name in models_to_compare:
+    for model_name, curr_model_metrics in model_metrics.items():
         # Get average deviation of coverage from target (tau)
-        coverage_data = model_data_dict[model_name]["coverage"]
-        coverage_deviation = pd.Series(index=coverage_data.index, dtype=float)
-        for tau in coverage_data.index:
-            coverage_tau = coverage_data.loc[tau]
-            coverage_deviation.loc[tau] = np.sqrt(((coverage_tau - tau) ** 2).mean())
+        coverage = curr_model_metrics.loc["coverage"]
+        coverage_dev = coverage - coverage.index.get_level_values("Quantiles")
+        rmse_coverage = (
+            (coverage_dev ** 2).mean(level="Quantiles").astype("float")
+        ) ** (1 / 2)
+
         # Get requirement and average over CV folds
-        requirement = model_data_dict[model_name]["requirement"].mean(axis=1)
-        # Plot
-        plt.plot(requirement, 100 * coverage_deviation, linewidth=0.8)
-        plt.scatter(requirement, 100 * coverage_deviation, alpha=0.7, label=model_name)
+        requirement = curr_model_metrics.loc["requirement"].mean(level="Quantiles")
 
-        # Add tau annotations
-        tau_values = model_data_dict[model_name]["coverage"].index  # Get tau values
-        for i in range(len(tau_values)):
-            plt.text(
-                requirement.iloc[i],
-                100 * coverage_deviation.iloc[i],
-                tau_values[i],
-                fontdict={"size": 7},
-            )
+        # plot the pareto front characterized by coverage error and reserve requirement
+        ax = plot_pareto_fronts(requirement, rmse_coverage, model_name, ax)
 
-    axes = plt.gca()  # Get axes of graph
-    x_min, x_max = axes.get_xlim()
-    y_min, y_max = axes.get_ylim()
-
-    # Plot desired direction for axes
-    # x-axis arrow(s)
-    plt.arrow(
-        -0.2 * (x_max - x_min),
-        y_min,
-        0.1 * (x_max - x_min),
-        0,
-        head_width=0.05 * (y_max - y_min),
-        head_length=0.05 * (x_max - x_min),
+    # Plot improvement direction for axes
+    ax.annotate(
+        "Better",
+        xy=(0.2, 0.8),
+        xytext=(0.1, 0.9),
+        horizontalalignment="left",
+        xycoords=ax.transAxes,
+        arrowprops=dict(arrowstyle="->"),
     )
-    plt.arrow(
-        0.2 * (x_max - x_min),
-        y_min,
-        -0.1 * (x_max - x_min),
-        0,
-        head_width=0.05 * (y_max - y_min),
-        head_length=0.05 * (x_max - x_min),
-    )
-    # y-axis arrow
-    plt.arrow(
-        x_min,
-        0.5 * (y_min + y_max),
-        0,
-        -0.1 * (y_max - y_min),
-        head_width=0.05 * (x_max - x_min),
-        head_length=0.05 * (y_max - y_min),
+    ax.annotate(
+        "Better",
+        xy=(0.8, 0.8),
+        xytext=(0.9, 0.9),
+        horizontalalignment="right",
+        xycoords=ax.transAxes,
+        arrowprops=dict(arrowstyle="->"),
     )
 
     # Add labels/formatting
-    plt.xlabel("Requirement (MW)")
-    plt.ylabel("Coverage Deviation (%)")
-    plt.legend()
-    plt.show()
+    ax.set_xlabel("Requirement (MW)")
+    ax.set_ylabel("Coverage Deviation (%)")
+    ax.legend(frameon=False, bbox_to_anchor=(0.5, 1), loc="lower center", ncol=2)
+    return fig, ax
 
 
-def plot_pinball_loss_variance_vs_pinball_loss(models_to_compare):
-    # Get model_data_dict
-    model_data_dict = get_model_data_dict(models_to_compare)
+def plot_pareto_pinball_loss_vs_loss_std(model_metrics):
 
-    # Iterate through tau <= 0.5 and tau >= 0.5
-    for k in range(2):
+    # Create subplots
+    fig, axarr = plt.subplots(1, 2, sharey=True)
 
-        # Create subplot
-        plt.subplot(1, 2, k + 1)
+    # Standard deviation of pinball loss vs. pinball loss
+    for model_name, curr_model_metrics in model_metrics.items():
 
-        # Standard deviation of pinball loss vs. pinball loss
-        for model_name in models_to_compare:
+        # Get pinball loss and average over CV folds
+        loss = curr_model_metrics.loc["pinball_loss"].mean(level="Quantiles")
+        # Get the standard deviation of pinball loss over CV folds
+        loss_std = curr_model_metrics.loc["pinball_loss"].std(level="Quantiles")
 
-            # Get tau values
-            tau_values = model_data_dict[model_name]["pinball_loss"].index
-            tau_values = [t for t in tau_values if t >= k * 0.5 and t <= (k + 1) * 0.5]
+        # Get tau values
+        lower_taus = loss.index[loss.index <= 0.5]
+        upper_taus = loss.index[loss.index >= 0.5]
 
-            # Get pinball loss and average over CV folds
-            loss = (
-                model_data_dict[model_name]["pinball_loss"].loc[tau_values].mean(axis=1)
+        # plot the lower quantiles and upper quantiles in separate plots for ease of reading
+        for i, taus in enumerate([lower_taus, upper_taus]):
+
+            # plot the pareto front characterized by pinball loss and deviation in pinball loss
+            axarr[i] = plot_pareto_fronts(
+                loss.loc[taus], loss_std.loc[taus], model_name, axarr[i]
             )
+            axarr[i].set_xlabel("Pinball Loss (MW)")
 
-            # Get requirement and average over CV folds
-            loss_deviation = (
-                model_data_dict[model_name]["pinball_loss"].loc[tau_values].std(axis=1)
-            )
-
-            # Plot
-            plt.plot(loss, loss_deviation, alpha=0.7, linewidth=0.8)
-            plt.scatter(loss, loss_deviation, alpha=0.7, label=model_name)
-
-            # Add tau annotations
-            for i in range(len(tau_values)):
-                plt.text(
-                    loss.iloc[i],
-                    loss_deviation.iloc[i],
-                    tau_values[i],
-                    fontdict={"size": 7},
-                )
-
-        axes = plt.gca()  # Get axes of graph
-        x_min, x_max = axes.get_xlim()
-        y_min, y_max = axes.get_ylim()
-
-        # Plot desired direction for axes
-        # x-axis arrow
-        plt.arrow(
-            0.5 * (x_min + x_max),
-            y_min,
-            -0.1 * (x_max - x_min),
-            0,
-            head_width=0.05 * (y_max - y_min),
-            head_length=0.05 * (x_max - x_min),
-        )
-        # y-axis arrow
-        plt.arrow(
-            x_min,
-            0.5 * (y_min + y_max),
-            0,
-            -0.1 * (y_max - y_min),
-            head_width=0.05 * (x_max - x_min),
-            head_length=0.05 * (y_max - y_min),
+    # plot improvement direction for axes
+    for ax in axarr:
+        ax.annotate(
+            "Better",
+            xy=(0.1, 0.8),
+            xytext=(0.2, 0.9),
+            horizontalalignment="left",
+            xycoords=ax.transAxes,
+            arrowprops=dict(arrowstyle="->"),
         )
 
-        plt.xlabel("Pinball Loss (MW)")
-        plt.ylabel("Pinball Loss Std. Dev. (MW)")
-        plt.legend(fontsize=8)
-
-    plt.tight_layout()
-    plt.show()
+    axarr[1].legend(frameon=False, bbox_to_anchor=(1, 0.5), loc="center left")
+    axarr[0].set_ylabel("Pinball Loss Std. Dev. (MW)")
+    return fig, axarr
 
 
 # ==== Unused/Archived diagnostics/plots ====
