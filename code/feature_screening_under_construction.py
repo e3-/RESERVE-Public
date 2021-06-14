@@ -13,7 +13,10 @@ mandatory_feature = [True, True, True, True, True, True]
 # How many additional features to add in based on correlation analysis?
 max_num_optional_features = 0
 
-def identify_highly_correlated_features(df, optional_feature, max_num_optional_features):
+
+def identify_highly_correlated_features(
+    df, optional_feature, max_num_optional_features
+):
     """
     Calculates and plots pair-wise correlation matrix for each column in df. Then identifies most highly
     correlated optional features (each represented by a column in the df) to remove
@@ -28,11 +31,15 @@ def identify_highly_correlated_features(df, optional_feature, max_num_optional_f
     plt.imshow(corr_matrix, cmap="Reds")
     plt.colorbar()
     plt.yticks(np.arange(len(corr_matrix.index)), corr_matrix.index)
-    plt.xticks(np.arange(len(corr_matrix.columns)), corr_matrix.columns, rotation='vertical')
+    plt.xticks(
+        np.arange(len(corr_matrix.columns)), corr_matrix.columns, rotation="vertical"
+    )
     plt.title("Correlation Matrix For All Features", fontweight="bold")
     plt.show()
     # Of the optional features, identify the ones most correlated with the others
-    optional_features_corr_sum = corr_matrix.sum(axis=1).loc[optional_feature].sort_values()
+    optional_features_corr_sum = (
+        corr_matrix.sum(axis=1).loc[optional_feature].sort_values()
+    )
     features_to_remove = optional_features_corr_sum.index[max_num_optional_features:]
     return features_to_remove
 
@@ -50,8 +57,12 @@ feature_idx += 1
 mandatory_feature = np.repeat(mandatory_feature, final_feature_count)
 optional_feature = np.logical_not(mandatory_feature)
 # Conduct correlation analysis and identify features to be removed, if any
-print("Performing correlation analysis to remove optional features highly correlated with the others....")
-features_to_remove = identify_highly_correlated_features(ML_inputs_df, optional_feature, max_num_optional_features)
+print(
+    "Performing correlation analysis to remove optional features highly correlated with the others...."
+)
+features_to_remove = identify_highly_correlated_features(
+    ML_inputs_df, optional_feature, max_num_optional_features
+)
 print("Features to be removed- {}....".format(features_to_remove.values))
 # Drop these feature from ML inputs' df
 ML_inputs_df = ML_inputs_df.drop(columns=features_to_remove)
