@@ -38,11 +38,15 @@ for i, tau in enumerate(tau_arr):
 
 mean_AIW_1 = np.mean(requirement_1, axis=1)
 std_coverage_1 = np.std(coverage_1, axis=1)
-RMS_coverage_1 = np.sqrt(np.mean((coverage_1 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1))
+RMS_coverage_1 = np.sqrt(
+    np.mean((coverage_1 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1)
+)
 
 mean_AIW_2 = np.mean(requirement_2, axis=1)
 std_coverage_2 = np.std(coverage_2, axis=1)
-RMS_coverage_2 = np.sqrt(np.mean((coverage_2 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1))
+RMS_coverage_2 = np.sqrt(
+    np.mean((coverage_2 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1)
+)
 
 scale = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
 a_ = np.mean(np.abs(np.append(mean_AIW_1, mean_AIW_2)))
@@ -54,28 +58,36 @@ for s in scale:
     frontier_x = np.linspace(-a, a, 1000)
     frontier_y = (b / a) * np.sqrt(a ** 2 - frontier_x ** 2)
 
-    plt.plot(frontier_x, frontier_y, 'k', linewidth=0.5)
+    plt.plot(frontier_x, frontier_y, "k", linewidth=0.5)
 
-plt.scatter(mean_AIW_1, 100 * RMS_coverage_1, alpha=0.7, c='blue', label="v1.1")
-plt.scatter(mean_AIW_2, 100 * RMS_coverage_2, alpha=0.7, c='orange', label="v1.1 - no calendar")
-plt.plot(mean_AIW_1, 100 * RMS_coverage_1, 'blue', linewidth=0.75)
-plt.plot(mean_AIW_2, 100 * RMS_coverage_2, 'orange', linewidth=0.75)
-plt.legend(loc='upper right')
-plt.xlabel('Mean Requirement (MW)')
-plt.ylabel('RMSE of Coverage (%)')
+plt.scatter(mean_AIW_1, 100 * RMS_coverage_1, alpha=0.7, c="blue", label="v1.1")
+plt.scatter(
+    mean_AIW_2, 100 * RMS_coverage_2, alpha=0.7, c="orange", label="v1.1 - no calendar"
+)
+plt.plot(mean_AIW_1, 100 * RMS_coverage_1, "blue", linewidth=0.75)
+plt.plot(mean_AIW_2, 100 * RMS_coverage_2, "orange", linewidth=0.75)
+plt.legend(loc="upper right")
+plt.xlabel("Mean Requirement (MW)")
+plt.ylabel("RMSE of Coverage (%)")
 plt.axis([-600, 600, 0.0, 2.0])
-plt.savefig(os.path.join('Pareto Comparison Plots', 'no_calendar_comparison.jpg'), dpi=250)
+plt.savefig(
+    os.path.join("Pareto Comparison Plots", "no_calendar_comparison.jpg"), dpi=250
+)
 plt.show()
 
 # Pareto Comparison
 
 mean_AIW_1 = np.mean(requirement_1, axis=1)
 std_coverage_1 = np.std(coverage_1, axis=1)
-RMS_coverage_1 = np.sqrt(np.mean((coverage_1 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1))
+RMS_coverage_1 = np.sqrt(
+    np.mean((coverage_1 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1)
+)
 
 mean_AIW_2 = np.mean(requirement_2, axis=1)
 std_coverage_2 = np.std(coverage_2, axis=1)
-RMS_coverage_2 = np.sqrt(np.mean((coverage_2 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1))
+RMS_coverage_2 = np.sqrt(
+    np.mean((coverage_2 - np.array(tau_arr).reshape(-1, 1)) ** 2, axis=1)
+)
 
 scale = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
 a_ = np.mean(np.abs(np.append(mean_AIW_1, mean_AIW_2)))
@@ -87,17 +99,21 @@ for s in scale:
     frontier_x = np.linspace(-a, a, 1000)
     frontier_y = (b / a) * np.sqrt(a ** 2 - frontier_x ** 2)
 
-    plt.plot(frontier_x, frontier_y, 'k', linewidth=0.5)
+    plt.plot(frontier_x, frontier_y, "k", linewidth=0.5)
 
-plt.scatter(mean_AIW_1, 100 * RMS_coverage_1, alpha=0.7, c='blue', label="v1.1")
-plt.scatter(mean_AIW_2, 100 * RMS_coverage_2, alpha=0.7, c='orange', label="v1.1 - no calendar")
-plt.plot(mean_AIW_1, 100 * RMS_coverage_1, 'blue', linewidth=0.75)
-plt.plot(mean_AIW_2, 100 * RMS_coverage_2, 'orange', linewidth=0.75)
-plt.legend(loc='upper right')
-plt.xlabel('Mean Requirement (MW)')
-plt.ylabel('RMSE of Coverage (%)')
+plt.scatter(mean_AIW_1, 100 * RMS_coverage_1, alpha=0.7, c="blue", label="v1.1")
+plt.scatter(
+    mean_AIW_2, 100 * RMS_coverage_2, alpha=0.7, c="orange", label="v1.1 - no calendar"
+)
+plt.plot(mean_AIW_1, 100 * RMS_coverage_1, "blue", linewidth=0.75)
+plt.plot(mean_AIW_2, 100 * RMS_coverage_2, "orange", linewidth=0.75)
+plt.legend(loc="upper right")
+plt.xlabel("Mean Requirement (MW)")
+plt.ylabel("RMSE of Coverage (%)")
 plt.axis([-600, 600, 0.0, 2.0])
-plt.savefig(os.path.join('Pareto Comparison Plots', 'no_calendar_comparison.jpg'), dpi=250)
+plt.savefig(
+    os.path.join("Pareto Comparison Plots", "no_calendar_comparison.jpg"), dpi=250
+)
 plt.show()
 
 # Pareto Comparison
@@ -114,14 +130,21 @@ std_coverage_1 = np.std(coverage_1, axis=1)
 mean_AIW_2 = np.mean(requirement_2, axis=1)
 std_coverage_2 = np.std(coverage_2, axis=1)
 
-plt.scatter(mean_risk_1, 100 * std_coverage_1, alpha=0.7, c='blue', label="v1.1")
-plt.scatter(mean_risk_2, 100 * std_coverage_2, alpha=0.7, c='orange', label="v1.1 - no calendar")
-plt.plot(mean_risk_1, 100 * std_coverage_1, 'blue', linewidth=0.75)
-plt.plot(mean_risk_2, 100 * std_coverage_2, 'orange', linewidth=0.75)
-plt.legend(loc='upper right')
-plt.xlabel('Pinball Loss (MW)')
-plt.ylabel('Standard Deviation of Coverage (%)')
-plt.savefig(os.path.join('Pareto Comparison Plots', 'no_calendar_comparison_CP_pinball_loss.jpg'), dpi=250)
+plt.scatter(mean_risk_1, 100 * std_coverage_1, alpha=0.7, c="blue", label="v1.1")
+plt.scatter(
+    mean_risk_2, 100 * std_coverage_2, alpha=0.7, c="orange", label="v1.1 - no calendar"
+)
+plt.plot(mean_risk_1, 100 * std_coverage_1, "blue", linewidth=0.75)
+plt.plot(mean_risk_2, 100 * std_coverage_2, "orange", linewidth=0.75)
+plt.legend(loc="upper right")
+plt.xlabel("Pinball Loss (MW)")
+plt.ylabel("Standard Deviation of Coverage (%)")
+plt.savefig(
+    os.path.join(
+        "Pareto Comparison Plots", "no_calendar_comparison_CP_pinball_loss.jpg"
+    ),
+    dpi=250,
+)
 plt.show()
 
 # Pareto Comparison
@@ -138,28 +161,33 @@ std_coverage_1 = np.std(coverage_1, axis=1)
 mean_AIW_2 = np.mean(requirement_2, axis=1)
 std_coverage_2 = np.std(coverage_2, axis=1)
 
-plt.scatter(mean_risk_1, std_risk_1, alpha=0.7, c='blue', label="v1.1")
-plt.scatter(mean_risk_2, std_risk_2, alpha=0.7, c='orange', label="v1.1 - no calendar")
-plt.plot(mean_risk_1, std_risk_1, 'blue', linewidth=0.75)
-plt.plot(mean_risk_2, std_risk_2, 'orange', linewidth=0.75)
-plt.legend(loc='upper right')
-plt.xlabel('Pinball Loss (MW)')
-plt.ylabel('Standard Deviation of Pinball Loss (MW)')
-plt.savefig(os.path.join('Pareto Comparison Plots', 'no_calendar_comparison_CP_pinball_loss.jpg'), dpi=250)
+plt.scatter(mean_risk_1, std_risk_1, alpha=0.7, c="blue", label="v1.1")
+plt.scatter(mean_risk_2, std_risk_2, alpha=0.7, c="orange", label="v1.1 - no calendar")
+plt.plot(mean_risk_1, std_risk_1, "blue", linewidth=0.75)
+plt.plot(mean_risk_2, std_risk_2, "orange", linewidth=0.75)
+plt.legend(loc="upper right")
+plt.xlabel("Pinball Loss (MW)")
+plt.ylabel("Standard Deviation of Pinball Loss (MW)")
+plt.savefig(
+    os.path.join(
+        "Pareto Comparison Plots", "no_calendar_comparison_CP_pinball_loss.jpg"
+    ),
+    dpi=250,
+)
 plt.show()
 
 # Plot to show how standard deviation of CP relates to standard deviation of pinball loss (generalizability metrics)
 
-plt.scatter(std_risk_1, std_coverage_1, alpha = 0.7, c = 'blue')
-plt.scatter(std_risk_2, std_coverage_2, alpha = 0.7, c = 'orange')
-plt.xlabel('Standard Deviation of Pinball Loss (MW)')
-plt.ylabel('Standard Deviation of Coverage (%)')
+plt.scatter(std_risk_1, std_coverage_1, alpha=0.7, c="blue")
+plt.scatter(std_risk_2, std_coverage_2, alpha=0.7, c="orange")
+plt.xlabel("Standard Deviation of Pinball Loss (MW)")
+plt.ylabel("Standard Deviation of Coverage (%)")
 plt.show()
 
 # Plot to show how standard deviation of CP relates to standard deviation of pinball loss (generalizability metrics)
 
-plt.scatter(std_risk_1, RMS_coverage_1, alpha = 0.7, c = 'blue')
-plt.scatter(std_risk_2, RMS_coverage_2, alpha = 0.7, c = 'orange')
-plt.xlabel('Standard Deviation of Pinball Loss (MW)')
-plt.ylabel('RMSE of Coverage (%)')
+plt.scatter(std_risk_1, RMS_coverage_1, alpha=0.7, c="blue")
+plt.scatter(std_risk_2, RMS_coverage_2, alpha=0.7, c="orange")
+plt.xlabel("Standard Deviation of Pinball Loss (MW)")
+plt.ylabel("RMSE of Coverage (%)")
 plt.show()
