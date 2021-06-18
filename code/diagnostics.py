@@ -435,6 +435,18 @@ def loop_thru_responses(
 
 
 def plot_pareto_fronts(x_values, y_values, model_name, ax):
+    """
+    Plots Pareto frontier for a given model configuration over multiple target quantiles (tau values)
+    with labels in a Pareto space comparing two model performance metrics
+    Args:
+        x_values: first model performance metric indexed over target quantiles (tau values)
+        y_values: second model performance metric indexed over target quantiles (tau values)
+        model_name: name of model configuration
+        ax: figure to plot frontier within
+
+    Returns: ax with Pareto frontier added
+    """
+
     ax.plot(x_values, y_values, alpha=0.7, linewidth=0.8, marker="o", label=model_name)
 
     # Add tau annotations
@@ -445,6 +457,16 @@ def plot_pareto_fronts(x_values, y_values, model_name, ax):
 
 
 def get_multiple_model_metrics(models_to_compare, output_for_pareto_comp):
+    """
+    Computes desired performance metrics for given model configurations over all
+    target quantiles (tau values) and re-organizes metrics data for easier plotting/comparison
+    Args:
+        models_to_compare: list of names of model configurations to compare
+        output_for_pareto_comp: list of desired metrics for comparison in Pareto efficiency framework
+
+    Returns: dictionary containing metrics dataframes for given model configurations
+
+    """
 
     # Get pred_trainval, output_trainval, and val_masks_all_folds for all models
     model_metrics = {}
@@ -480,6 +502,14 @@ def get_multiple_model_metrics(models_to_compare, output_for_pareto_comp):
 
 
 def plot_pareto_coverage_rmse_vs_req(model_metrics):
+    """
+    Plot Pareto frontiers of model configurations being compared in the space of "average deviation from
+    target coverage over cross-validation folds" vs. "requirement
+    Args:
+        model_metrics: dictionary containing metrics dataframes for model configurations being compared
+
+    Returns: fig, ax; plot of Pareto frontiers for model configurations being compared
+    """
 
     fig, ax = plt.subplots()
 
@@ -524,7 +554,14 @@ def plot_pareto_coverage_rmse_vs_req(model_metrics):
 
 
 def plot_pareto_pinball_loss_vs_loss_std(model_metrics):
+    """
+    Plot Pareto frontiers of model configurations being compared in the space of "pinball loss" vs.
+     "standard deviation of pinball loss over cross validation folds"
+    Args:
+        model_metrics: dictionary containing metrics dataframes for model configurations being compared
 
+    Returns: fig, ax; plot of Pareto frontiers for model configurations being compared
+    """
     # Create subplots
     fig, axarr = plt.subplots(1, 2, sharey=True)
 
