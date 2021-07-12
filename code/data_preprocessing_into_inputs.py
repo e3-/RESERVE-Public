@@ -42,17 +42,24 @@ import utility
 # ==== User inputs ====
 
 # Declare files that data-checker produces but aren't to be used to create inputs for ML
-files_to_ignore = ["summary_all_files.csv", "archive"]
+FILES_TO_IGNORE = ["summary_all_files.csv", "archive"]
+
+# Column names corresponding to those in data-checker output files
+COL_NAME_FOR_VALUE = "Forecast_Interval_Avg_MW"
+COL_NAME_FOR_VALIDITY_FLAG = "valid_all_checks"
+COL_NAME_FOR_DT = "Datetime_Interval_Start"
 
 # Temporal characteristics required for making trainval set
+# TODO: do we need a start date and end date here? Shouldn't this be inferred from the files?
 start_date = "01-01-2017"  # Inclusive
 end_date = "01-01-2020"  # Exclusive
 ML_time_step = "5T"  # T implies minutes
 
-# Column names corresponding to those in data-checker output files
-col_name_for_value = "Forecast_Interval_Avg_MW"
-col_name_for_validity_flag = "valid_all_checks"
-datetime_col_name = "Datetime_Interval_Start"
+# The names of several calendar related terms
+hour_angle_col_name = "Hour_Angle"
+day_angle_col_name = "Day_Angle"
+days_from_start_date_col_name = "Days_from_Start_Date"
+interval_id_col_name = "5_Min_Interval_ID"
 
 # the name of the model version that this data would serve
 model_name = "rescue_5_min_v1_single_obj_test"
@@ -79,9 +86,15 @@ time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
 rtpd_interval = 15  # minutes
 rtd_interval = 5  # minutes
 
-# This flag should be set to True, if you want model response to be all of net load, load, solar and wind forecast
-# errors in that order. Set to False for creating a single response variable, the net load forecast error
-multi_obj_learning_flag = False
+# The only four response labels allowed are Net_Load_Forecast_Error, Load_Forecast_Error, Solar_Forecast_Error,
+# Wind_Forecast_Error. They can appear in arbitrary order and can be repeated or omitted. Strings other than these four
+# here would result in an error message.
+response_col_names = [
+    "Net_Load_Forecast_Error",
+    "Load_Forecast_Error",
+    "Solar_Forecast_Error",
+    "Wind_Forecast_Error",
+]
 
 # ==== Helper functions that don't need user intervention ====
 
@@ -144,25 +157,28 @@ def calculate_response_variables(raw_data_df, response_col_names):
         load_forecast_error - solar_forecast_error - wind_forecast_error
     )
 
-    # Net load forecast error will be the sole response in single objective learning
-    response_values_df.loc[:, "Net_Load_Forecast_Error"] = net_load_forecast_error
+    for col_name in response_col_names:
 
-    # The response variable(s) below have been added for multi-objective learning
-    if len(response_col_names) > 1:
-        response_values_df.loc[:, "Load_Forecast_Error"] = load_forecast_error
-        response_values_df.loc[:, "Solar_Forecast_Error"] = solar_forecast_error
-        response_values_df.loc[:, "Wind_Forecast_Error"] = wind_forecast_error
+        if "Net_Load_Forecast_Error" == col_name:
+            response_values_df[col_name] = net_load_forecast_error
+        elif "Load_Forecast_Error" == col_name:
+            response_values_df[col_name] = load_forecast_error
+        elif "Solar_Forecast_Error" == col_name:
+            response_values_df[col_name] = solar_forecast_error
+        elif "Wind_Forecast_Error" == col_name:
+            response_values_df[col_name] = wind_forecast_error
+        else:
+            raise ValueError(
+                "{} is not allowed as a keyword for response variables!".format(
+                    col_name
+                )
+            )
 
     return response_values_df
 
 
 def calculate_calendar_based_predictors(
-    datetime_arr,
-    longitude,
-    time_difference_from_UTC,
-    rtpd_interval,
-    rtd_interval,
-    start_date=None,
+    datetime_arr, longitude, time_difference_from_UTC, rtpd_interval, rtd_interval
 ):
     """
     Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
@@ -209,8 +225,7 @@ def calculate_calendar_based_predictors(
     solar_hour_angle_arr = 15 * (local_solar_time_arr - 12)  # degrees
 
     # Calculate days passed since start date
-    if start_date is None:
-        start_date = datetime_arr[0]
+    start_date = datetime_arr[0]
     days_from_start_date_arr = (datetime_arr - start_date).days
 
     # Calculate rtd interval ids w.r.t each rtpd interval
@@ -284,11 +299,11 @@ def pad_raw_data_w_lag_lead(
 
 
 def main(
-    files_to_ignore=files_to_ignore,
     start_date=start_date,
     end_date=end_date,
     ML_time_step=ML_time_step,
     model_name=model_name,
+    response_col_names=response_col_names,
     lag_term_start_predictors=lag_term_start_predictors,
     lag_term_end_predictors=lag_term_end_predictors,
     lag_term_step_predictors=lag_term_step_predictors,
@@ -297,40 +312,15 @@ def main(
     time_difference_from_UTC=time_difference_from_UTC,
     rtpd_interval=rtpd_interval,
     rtd_interval=rtd_interval,
-    multi_obj_learning_flag=multi_obj_learning_flag,
 ):
-    # ==== Constants for use in script that DON'T need to be user defined ====
-
-    # Column names corresponding to those in data-checker output files
-    col_name_for_value = "Forecast_Interval_Avg_MW"
-    col_name_for_validity_flag = "valid_all_checks"
-    datetime_col_name = "Datetime_Interval_Start"
-
-    # Labels for response (output(s) model is trained to predict)
-    if multi_obj_learning_flag:
-        # You can change these labels, but the order MUST be net load->load->solar->wind
-        # To change order or add/remove any response variables, you will need to change the function
-        # calculate_response_variables too
-        response_col_names = [
-            "Net_Load_Forecast_Error",
-            "Load_Forecast_Error",
-            "Solar_Forecast_Error",
-            "Wind_Forecast_Error",
-        ]
-    else:
-        response_col_names = ["Net_Load_Forecast_Error"]
-
-    # The names of several calendar related terms
-    hour_angle_col_name = "Hour_Angle"
-    day_angle_col_name = "Day_Angle"
-    days_from_start_date_col_name = "Days_from_Start_Date"
-    interval_id_col_name = "5_Min_Interval_ID"
 
     # ==== 0. Read in each time-series feature, output from the data-checker and ensure it matches ML time-step ====
     # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
     dir_str = utility.Dir_Structure(model_name=model_name)
     path_to_data_checker_outputs = dir_str.data_checker_dir
 
+    # TODO: Is it necessary to initialize this before hand or could this be created on the go?
+    # This would eliminate the need of start_date and end_date. Maybe it is never quite necessary?
     # Initialize df to hold collated data for ML model
     raw_data_df = pd.DataFrame(
         index=pd.date_range(
@@ -344,20 +334,21 @@ def main(
         "Reading in outputs from data-checker and ensuring temporal resolution meets requirement for model...."
     )
     for file in os.listdir(path_to_data_checker_outputs):
-        feature_name = file.strip(".csv")
-        if file in files_to_ignore:
-            print(
-                "Skipping {}. Not assumed to be holding inputs for ML model".format(
-                    file
-                )
-            )
+        feature_name = file.strip(".csv")  # identify feature name
+
+        # ignore files based on the list of files to ignore
+        if file in FILES_TO_IGNORE:
+            print("Skipping {}. Not actual inputs for ML model".format(file))
             continue
+
         feature_df = pd.read_csv(
             os.path.join(path_to_data_checker_outputs, file),
-            usecols=[datetime_col_name, col_name_for_value, col_name_for_validity_flag],
-            index_col=datetime_col_name,
+            usecols=[COL_NAME_FOR_DT, COL_NAME_FOR_VALUE, COL_NAME_FOR_VALIDITY_FLAG],
+            index_col=COL_NAME_FOR_DT,
             parse_dates=True,
         )
+
+        # TODO: is it necessary to do this check?
         # Determine time-step size in the data for this feature
         inferred_freq = pd.infer_freq(feature_df.index)
         # If inferred frequency is 1 of something, say 1 min or 1 H, it will just be represented
@@ -366,6 +357,7 @@ def main(
             feature_time_step = pd.Timedelta(inferred_freq).seconds
         else:
             feature_time_step = pd.Timedelta("1" + inferred_freq).seconds
+
         # Similarly, determine time-step required for ML model
         inferred_freq = pd.infer_freq(raw_data_df.index)
         if inferred_freq[0].isdigit():
@@ -374,33 +366,39 @@ def main(
             ML_inputs_time_step = pd.Timedelta("1" + inferred_freq).seconds
 
         # ==== Option 1 of 3 ====
-        # If the feature time-step size matches that needed for ML inputs, place the feature into the ML inputs df
-        # without any changes
+        # If the feature time-step matches that needed for ML inputs, incorporate the feature directly
+        # TODO: this merge df function seems overkill. Can they just use regular merge and drop invalid columns
+        # in the end?
         if feature_time_step == ML_inputs_time_step:
             raw_data_df, raw_data_validity = merge_df(
                 raw_data_df,
-                feature_df[col_name_for_value],
+                feature_df[COL_NAME_FOR_VALUE],
                 raw_data_validity,
-                feature_df[col_name_for_validity_flag],
+                feature_df[COL_NAME_FOR_VALIDITY_FLAG],
             )
             # Rename from generic col name to feature-specific name
-            raw_data_df = raw_data_df.rename(columns={col_name_for_value: feature_name})
+            # This should be done as part of the merging
+            raw_data_df = raw_data_df.rename(columns={COL_NAME_FOR_VALUE: feature_name})
             raw_data_validity = raw_data_validity.rename(
-                columns={col_name_for_validity_flag: feature_name}
+                columns={COL_NAME_FOR_VALIDITY_FLAG: feature_name}
             )
         # ==== Option 2 of 3 ====
-        # If the time step is shorter than that desired, create multiple features
-        # Lets say we have 5-min features and ML inputs are on a 15-min resolution. Then, create three 15-minutely features
-        # out of the one 5-min feature currently being assessed
+        # If the time step is shorter/more frequent than that desired, create multiple features for each ML time step
+        # Say we have 5-min features and ML inputs are on a 15-min resolution. Then, create three 15-min feature stream
+        # from this 5-min feature stream corresponding to the three 5 minute intervals in the 15 minute.
         elif feature_time_step < ML_inputs_time_step:
             assert ML_inputs_time_step % feature_time_step == 0, (
-                "ML time-step needs to be equal to or a perfect multiple of "
-                "feature time-step. Not the case for {}".format(feature_name)
+                "When ML model's temporal time step is longer than that of the raw feature data, it must be multitudes"
+                "of the feature timestep. Not the case for {}".format(feature_name)
             )
+
             num_substeps = int(ML_inputs_time_step / feature_time_step)
             # Create new index and labels for the additional features to be created
+            # TODO: what's the usage of the feature_name substep and the time_stamp idx?
+            #  is there not a better more apt term for them
+
             feature_name_substep_idx = [
-                feature_name + "_" + str(i) for i in range(num_substeps)
+                "{}_{}".format(feature_name, i) for i in range(num_substeps)
             ]
             feature_name_substep_idx = np.tile(
                 feature_name_substep_idx, int(feature_df.shape[0] / num_substeps)
@@ -414,9 +412,9 @@ def main(
             feature_df = feature_df.unstack()
             raw_data_df, raw_data_validity = merge_df(
                 raw_data_df,
-                feature_df[col_name_for_value],
+                feature_df[COL_NAME_FOR_VALUE],
                 raw_data_validity,
-                feature_df[col_name_for_validity_flag],
+                feature_df[COL_NAME_FOR_VALIDITY_FLAG],
             )
         # ==== Option 3 of 3 ====
         # If feature time-step is longer than desired, replicate feature
@@ -424,28 +422,28 @@ def main(
         # value 4 times, once for each 15 min interval in the given hour
         else:
             assert feature_time_step % ML_inputs_time_step == 0, (
-                "Feature time-step needs to be equal to or a perfect "
-                "multiple of the ML time-step. Not the case for "
-                "{}".format(feature_name)
+                "When ML model's temporal time step is shorter than that of the raw feature data, it must be a factor"
+                "of the feature time step. Not the case for {}".format(feature_name)
             )
             repeated_feature_df = feature_df.resample(
                 str(ML_inputs_time_step) + "S"
             ).pad()
             raw_data_df, raw_data_validity = merge_df(
                 raw_data_df,
-                repeated_feature_df[col_name_for_value],
+                repeated_feature_df[COL_NAME_FOR_VALUE],
                 raw_data_validity,
-                repeated_feature_df[col_name_for_validity_flag],
+                repeated_feature_df[COL_NAME_FOR_VALIDITY_FLAG],
             )
             # Rename from generic col name to feature-specific name
-            raw_data_df = raw_data_df.rename(columns={col_name_for_value: feature_name})
+            raw_data_df = raw_data_df.rename(columns={COL_NAME_FOR_VALUE: feature_name})
             raw_data_validity = raw_data_validity.rename(
-                columns={col_name_for_validity_flag: feature_name}
+                columns={COL_NAME_FOR_VALIDITY_FLAG: feature_name}
             )
 
     # ==== 1. Identify valid raw data and pad for downstream manipulation ====
 
     # Check the validity mask of the raw data is consistent with data's shape
+    # TODO: development check. Remove by end of development
     assert (
         raw_data_df.index == raw_data_validity.index
     ).all(), "Validity mask and Data index inconsistent!"
@@ -463,9 +461,9 @@ def main(
         lag_term_end_predictors,
         response_lead_term,
     )
-    raw_data_start_date = raw_data_df.index[raw_data_start_idx]
 
     # ==== 2. Add in calendar terms for the raw data ====
+    # TODO: why does it need the rtpd and rtd interval? Consider moving it to CAISO specific segment
     print("Calculating calendar-based predictors....")
     (
         raw_data_df[hour_angle_col_name],
@@ -478,7 +476,6 @@ def main(
         time_difference_from_UTC,
         rtpd_interval,
         rtd_interval,
-        raw_data_start_date,
     )
 
     # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
@@ -489,21 +486,26 @@ def main(
 
     # Revise the lag term array since we are extending the original data
     num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
-    lag_term_start_predictors = np.hstack(
+    # TODO: clean up a bit by combining the terms.
+    lag_term_start_all = np.hstack(
         (
             lag_term_start_predictors,
             np.ones(num_feature_ext, dtype=int) * response_lead_term,
         )
     )
-    lag_term_end_predictors = np.hstack(
+    lag_term_end_all = np.hstack(
         (
             lag_term_end_predictors,
             np.ones(num_feature_ext, dtype=int) * response_lead_term,
         )
     )
     # We are going from T0 to prediction time in 1 step
-    lag_term_step_predictors = np.hstack(
-        (lag_term_step_predictors, np.ones(num_feature_ext, dtype=int) * 1)
+    # The step here should actually be as large as the lead term
+    lag_term_step_all = np.hstack(
+        (
+            lag_term_step_predictors,
+            np.ones(num_feature_ext, dtype=int) * response_lead_term,
+        )
     )
 
     # ==== 4. Using vectorized operations to construct lag terms ====
@@ -518,9 +520,9 @@ def main(
     for feature_idx, feature_type in enumerate(raw_data_df.columns):
 
         # obtain lag term start and end offset, as well as step size for a certain feature
-        lag_term_start = lag_term_start_predictors[feature_idx]
-        lag_term_end = lag_term_end_predictors[feature_idx]
-        lag_term_step = lag_term_step_predictors[feature_idx]
+        lag_term_start = lag_term_start_all[feature_idx]
+        lag_term_end = lag_term_end_all[feature_idx]
+        lag_term_step = lag_term_step_all[feature_idx]
 
         # Iterate over each time step for current predictor type
         for time_step in range(lag_term_start, lag_term_end + 1, lag_term_step):
@@ -544,10 +546,10 @@ def main(
     trainval_data_df = trainval_data_df.dropna()
 
     # Separate predictors (model inputs) from response (model output(s))
-    response_col_names = [
+    response_col_labels = [
         "{}_T{:+}".format(name, response_lead_term) for name in response_col_names
     ]
-    trainval_outputs_df = trainval_data_df.loc[:, response_col_names].copy()
+    trainval_outputs_df = trainval_data_df.loc[:, response_col_labels].copy()
     trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
 
     # Save trainval samples
