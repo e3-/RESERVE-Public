@@ -18,7 +18,7 @@ class Dir_Structure:
         self.par_dir = os.path.dirname(self.code_dir)  # parent directory
         self.raw_data_dir = os.path.join(self.par_dir, "data", "raw_data")
         self.data_checker_dir = os.path.join(
-            self.par_dir, "data_checker_outputs"
+            self.raw_data_dir, "data_checker_outputs"
         )  # stores data checker outputs
         self.data_dir = os.path.join(
             self.par_dir, "data", self.model_name
