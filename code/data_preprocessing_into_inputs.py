@@ -61,7 +61,7 @@ COL_NAME_DAYS_IDX = "Days_from_Start_Date"
 ML_time_step = pd.Timedelta("5T")  # T implies minutes
 
 # the name of the model version that this data would serve
-model_name = "rescue_v1_4"
+model_name = "rescue_v1_4_manually_cleaned"
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
