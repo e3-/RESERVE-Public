@@ -17,12 +17,15 @@ class Dir_Structure:
         # Define paths to directories
         self.par_dir = os.path.dirname(self.code_dir)  # parent directory
         self.raw_data_dir = os.path.join(self.par_dir, "data", "raw_data")
+        self.data_checker_dir = os.path.join(
+            self.raw_data_dir, "data_checker_outputs"
+        )  # stores data checker outputs
         self.data_dir = os.path.join(
             self.par_dir, "data", self.model_name
         )  # stores data/input
         self.output_dir = os.path.join(
             self.par_dir, "output", self.model_name
-        )  # stores inferrence results
+        )  # stores inference results
         self.logs_dir = os.path.join(
             self.par_dir, "logs", self.model_name
         )  # training log for tensorboard
@@ -45,12 +48,6 @@ class Dir_Structure:
         )
         self.input_trainval_path = os.path.join(self.data_dir, "input_trainval.pkl")
         self.output_trainval_path = os.path.join(self.data_dir, "output_trainval.pkl")
-        self.raw_data_path = os.path.join(
-            self.raw_data_dir, "input_values_for_M_by_N_creating_script.csv"
-        )
-        self.raw_data_validity_path = os.path.join(
-            self.raw_data_dir, "input_validity_flags_for_M_by_N_creating_script.csv"
-        )
         self.pred_trainval_path = os.path.join(self.output_dir, "pred_trainval.pkl")
         self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
         self.metrics_path = os.path.join(self.diag_dir, "metrics.npy")
