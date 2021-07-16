@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 
+import cross_val
+import utility
+import metrics
+
 # ==== Constants ====
 E3_COLORS = [
     [3, 78, 110],
@@ -425,6 +429,178 @@ def loop_thru_responses(
         plt.close(fig)
 
     return fig, ax
+
+
+# ==== Pareto plots/functions ====
+
+
+def plot_pareto_fronts(x_values, y_values, model_name, ax):
+    """
+    Plots Pareto frontier for a given model configuration over multiple target quantiles (tau values)
+    with labels in a Pareto space comparing two model performance metrics
+    Args:
+        x_values: np.array, first model performance metric indexed over target quantiles (tau values)
+        y_values: np.array, second model performance metric indexed over target quantiles (tau values)
+        model_name: str, name of model configuration
+        ax: matplotlib.ax, figure to plot frontier within
+
+    Returns: ax with Pareto frontier added
+    """
+
+    ax.plot(x_values, y_values, alpha=0.7, linewidth=0.8, marker="o", label=model_name)
+
+    # Add tau annotations
+    for tau in x_values.index:
+        ax.text(x_values.loc[tau], y_values.loc[tau], tau)
+
+    return ax
+
+
+def get_multiple_model_metrics(models_to_compare, output_for_pareto_comp):
+    """
+    Computes desired performance metrics for given model configurations over all
+    target quantiles (tau values) and re-organizes metrics data for easier plotting/comparison
+    Args:
+        models_to_compare: list of str. list of names of model configurations to compare
+        output_for_pareto_comp: As rescue is often times run in multi-objective mode. This variable select the specific
+        response we would run metric and pareto comparison on.
+
+    Returns: dictionary containing metrics dataframes for given model configurations
+
+    """
+
+    # Get pred_trainval, output_trainval, and val_masks_all_folds for all models
+    model_metrics = {}
+    for model_name in models_to_compare:
+        print("Calculating metrics for ", model_name)
+        # Load in/ Create folder structure for the current model
+        dir_str = utility.Dir_Structure(model_name=model_name)
+
+        # Read in predictions, targets, and validation masks for the current model
+        pred_trainval = pd.read_pickle(dir_str.pred_trainval_path)
+        output_trainval = pd.read_pickle(dir_str.output_trainval_path)
+        num_cv_folds = len(pred_trainval.columns.levels[1])
+        val_masks_all_folds = cross_val.get_CV_masks(
+            output_trainval.index, num_cv_folds, dir_str.shuffled_indices_path
+        )
+
+        # Get CV fold metrics; passing "val_masks_all_folds" will compute metrics only on validation set data
+        df_metrics = metrics.compute_metrics_for_all_taus(
+            output_trainval,
+            pred_trainval,
+            val_masks=val_masks_all_folds,
+            dir_str=dir_str,
+            avg_across_folds=False,
+        )
+
+        model_metrics[model_name] = (
+            df_metrics.xs(output_for_pareto_comp, level="Output_Name", axis=1)
+            .copy()
+            .astype("float")
+        )
+
+    return model_metrics
+
+
+def plot_pareto_coverage_rmse_vs_req(model_metrics):
+    """
+    Plot Pareto frontiers of model configurations being compared in the space of "average deviation from
+    target coverage over cross-validation folds" vs. "requirement
+    Args:
+        model_metrics: dictionary containing metrics dataframes for each model configurations being compared
+
+    Returns: fig, ax; plot of Pareto frontiers for model configurations being compared
+    """
+
+    fig, ax = plt.subplots()
+
+    # Average deviation of coverage from target vs. requirement
+    for model_name, curr_model_metrics in model_metrics.items():
+        # Get average deviation of coverage from target (tau)
+        coverage = curr_model_metrics.loc["coverage"]
+        coverage_dev = coverage - coverage.index.get_level_values("Quantiles")
+        rmse_coverage = (
+            (coverage_dev ** 2).mean(level="Quantiles").astype("float")
+        ) ** (1 / 2)
+
+        # Get requirement and average over CV folds
+        requirement = curr_model_metrics.loc["requirement"].mean(level="Quantiles")
+
+        # plot the pareto front characterized by coverage error and reserve requirement
+        ax = plot_pareto_fronts(requirement, rmse_coverage, model_name, ax)
+
+    # Plot improvement direction for axes
+    ax.annotate(
+        "Better",
+        xy=(0.2, 0.8),
+        xytext=(0.1, 0.9),
+        horizontalalignment="left",
+        xycoords=ax.transAxes,
+        arrowprops=dict(arrowstyle="->"),
+    )
+    ax.annotate(
+        "Better",
+        xy=(0.8, 0.8),
+        xytext=(0.9, 0.9),
+        horizontalalignment="right",
+        xycoords=ax.transAxes,
+        arrowprops=dict(arrowstyle="->"),
+    )
+
+    # Add labels/formatting
+    ax.set_xlabel("Requirement (MW)")
+    ax.set_ylabel("Coverage Deviation (%)")
+    ax.legend(frameon=False, bbox_to_anchor=(0.5, 1), loc="lower center", ncol=2)
+    return fig, ax
+
+
+def plot_pareto_pinball_loss_vs_loss_std(model_metrics):
+    """
+    Plot Pareto frontiers of model configurations being compared in the space of "pinball loss" vs.
+     "standard deviation of pinball loss over cross validation folds"
+    Args:
+        model_metrics: dictionary containing metrics dataframes for each model configurations being compared
+
+    Returns: fig, ax; plot of Pareto frontiers for model configurations being compared
+    """
+    # Create subplots
+    fig, axarr = plt.subplots(1, 2, sharey=True)
+
+    # Standard deviation of pinball loss vs. pinball loss
+    for model_name, curr_model_metrics in model_metrics.items():
+
+        # Get pinball loss and average over CV folds
+        loss = curr_model_metrics.loc["pinball_loss"].mean(level="Quantiles")
+        # Get the standard deviation of pinball loss over CV folds
+        loss_std = curr_model_metrics.loc["pinball_loss"].std(level="Quantiles")
+
+        # Get tau values
+        lower_taus = loss.index[loss.index <= 0.5]
+        upper_taus = loss.index[loss.index >= 0.5]
+
+        # plot the lower quantiles and upper quantiles in separate plots for ease of reading
+        for i, taus in enumerate([lower_taus, upper_taus]):
+
+            # plot the pareto front characterized by pinball loss and deviation in pinball loss
+            axarr[i] = plot_pareto_fronts(
+                loss.loc[taus], loss_std.loc[taus], model_name, axarr[i]
+            )
+            axarr[i].set_xlabel("Pinball Loss (MW)")
+
+    # plot improvement direction for axes
+    for ax in axarr:
+        ax.annotate(
+            "Better",
+            xy=(0.1, 0.8),
+            xytext=(0.2, 0.9),
+            horizontalalignment="left",
+            xycoords=ax.transAxes,
+            arrowprops=dict(arrowstyle="->"),
+        )
+
+    axarr[1].legend(frameon=False, bbox_to_anchor=(1, 0.5), loc="center left")
+    axarr[0].set_ylabel("Pinball Loss Std. Dev. (MW)")
+    return fig, axarr
 
 
 # ==== Unused/Archived diagnostics/plots ====
