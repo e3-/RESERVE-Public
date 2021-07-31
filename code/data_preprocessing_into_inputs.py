@@ -1,4 +1,3 @@
-# ==== TODO: Consider having option to disallow overlaps between subsequent training samples
 # ==== Change log v1.5 (5/29/2021) ====
 # Added functionality to take raw outputs from the data-checker, ensure each of them match desired temporal
 # resolution and then create the trainval inputs and outputs as before
@@ -164,7 +163,7 @@ def calculate_calendar_based_predictors(
     solar_day_angle_arr (Array of floats): Day angle in degrees for each timepoint in datetime_arr
     days_from_start_date_arr (Array of ints): Days passed since a particular start date, defined for each timepoint in datetime_arr
 
-    Reference for formulae:https://www.pveducation.org/pvcdrom/properties-of-sunlight/solar-time
+    Reference for formulae:C.B.Honsberg and S.G.Bowden, “Photovoltaics Education Website,” www.pveducation.org, 2019
     """
     # Steps leading up to calculation of local solar time
     day_of_year_arr = datetime_arr.dayofyear
