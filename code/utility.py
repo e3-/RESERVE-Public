@@ -1,3 +1,24 @@
+# ############################ LICENSE INFORMATION ############################
+# This file is part of the E3 RESERVE Model.
+
+# Copyright (C) 2021 Energy and Environmental Economics, Inc.
+# For contact information, go to www.ethree.com
+
+# The E3 RESERVE Model is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# The E3 RESERVE Model is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with the E3 RESERVE Model (in the file LICENSE.TXT). If not,
+# see <http://www.gnu.org/licenses/>.
+# #############################################################################
+
 import os
 import shutil
 
@@ -17,12 +38,15 @@ class Dir_Structure:
         # Define paths to directories
         self.par_dir = os.path.dirname(self.code_dir)  # parent directory
         self.raw_data_dir = os.path.join(self.par_dir, "data", "raw_data")
+        self.data_checker_dir = os.path.join(
+            self.raw_data_dir, "data_checker_outputs"
+        )  # stores data checker outputs
         self.data_dir = os.path.join(
             self.par_dir, "data", self.model_name
         )  # stores data/input
         self.output_dir = os.path.join(
             self.par_dir, "output", self.model_name
-        )  # stores inferrence results
+        )  # stores inference results
         self.logs_dir = os.path.join(
             self.par_dir, "logs", self.model_name
         )  # training log for tensorboard
@@ -45,12 +69,6 @@ class Dir_Structure:
         )
         self.input_trainval_path = os.path.join(self.data_dir, "input_trainval.pkl")
         self.output_trainval_path = os.path.join(self.data_dir, "output_trainval.pkl")
-        self.raw_data_path = os.path.join(
-            self.raw_data_dir, "input_values_for_M_by_N_creating_script.csv"
-        )
-        self.raw_data_validity_path = os.path.join(
-            self.raw_data_dir, "input_validity_flags_for_M_by_N_creating_script.csv"
-        )
         self.pred_trainval_path = os.path.join(self.output_dir, "pred_trainval.pkl")
         self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
         self.metrics_path = os.path.join(self.diag_dir, "metrics.npy")
