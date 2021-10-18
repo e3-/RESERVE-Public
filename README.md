@@ -39,4 +39,5 @@ RESCUE model supports multi-objective learning. For example, in addition to prod
 4. Model agnostic. No requirement on knowledge of the inner workings of the netload forecast
 5. Adheres to best practice in statistics: cross validation, normalization, early-stopping, etc.
 
+## *Userguide:*
 For a user guide, please refer to this [document](https://willdan.box.com/s/ukgey1q1itzpet1db5cp14b6qjmlkqx6)
