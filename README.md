@@ -1,5 +1,5 @@
-# RESCUE
-Renewable Energy Salient Combined Uncertainty Estimator
+# RESERVE
+Previously known as RESCUE (Renewable Energy Salient Combined Uncertainty Estimator)
 
 ## *Legal Information:*
 This file is part of the E3 RESERVE Model.
