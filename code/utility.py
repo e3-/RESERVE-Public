@@ -64,6 +64,7 @@ class Dir_Structure:
         )  # diagnostic plots
 
         # Define paths to files
+        self.RESERVE_settings_path = os.path.join(self.par_dir, "data", "RESERVE_settings.xlsx")
         self.shuffled_indices_path = os.path.join(
             self.data_dir, "shuffled_indices_{}.npy".format(self.model_name)
         )

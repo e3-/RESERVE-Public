@@ -58,14 +58,28 @@ import os
 import numpy as np
 import pandas as pd
 import utility
+import pathlib
+dir_str = utility.Dir_Structure()
 
 # ==== User inputs ====
 
-# Declare files that data-checker produces but aren't to be used to create inputs for ML
-FILES_TO_IGNORE = ["summary_all_files.csv", "archive"]
+# Import RESERVE settings and input file settings
+df_model_settings = pd.read_excel(dir_str.RESERVE_settings_path, sheet_name="RESERVE Settings", index_col=[0])
+df_data_settings = pd.read_excel(dir_str.RESERVE_settings_path, sheet_name="Input File Settings", index_col=[0])
+# Remove ".csv" tags from lag term dataframe indices
+df_file_settings.index = [f.strip('.csv') for f in df_file_settings.index]
+
+# List of input files/features
+input_features = df_file_settings.index
+
+# the name of the model version that this data would serve
+model_name = df_model_settings.loc["MODEL_NAME", "Value"]
+
+# Temporal characteristics required for making trainval set
+ML_time_step = pd.Timedelta(str(df_model_settings.loc["ML_TIME_STEP", "Value"]) + "T")  # T implies minutes
 
 # Used to give a consistent day idx sequencing.
-ANCHOR_DATE = "2017-01-01"
+ANCHOR_DATE = df_model_settings.loc["ANCHOR_DATE", "Value"]
 
 # Column names corresponding to those in data-checker output files
 COL_NAME_FOR_VALUE = "Forecast_Interval_Avg_MW"
@@ -77,62 +91,83 @@ COL_NAME_HOUR_ANGLE = "Hour_Angle"
 COL_NAME_DAY_ANGLE = "Day_Angle"
 COL_NAME_DAYS_IDX = "Days_from_Start_Date"
 
-# Temporal characteristics required for making trainval set
-ML_time_step = pd.Timedelta("5T")  # T implies minutes
-
-# the name of the model version that this data would serve
-model_name = "rescue_v1_4_manually_cleaned"
+# Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
+# # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
+# that take place over time.
+longitude = df_model_settings.loc["LONGITUDE", "Value"]  # Roughly passing through the center of CA
+time_difference_from_UTC = df_model_settings.loc["TIME_DIFFERENCE_FROM_UTC", "Value"]  # hours. Timestamps for input data are in PST
 
 # Define the amount of lag terms that would end up in the input for each feature type
 # +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
 # E.g. 1: start = -2, end = -1 implies only include values from 2 past time steps.
 # E.g. 2: start = 0 , end = -1 implies do not include any terms for this feature.
-lag_term_start_predictors = np.array([-6, -6, -6, -6, -6, -6])
-lag_term_end_predictors = np.array([-1, 3, -1, 3, -1, 3])
+lag_term_start_predictors = df_file_settings["Lag Term Start Interval"]
+lag_term_end_predictors = df_file_settings["Lag Term End Interval"]
 # Step size between subsequent lag terms for ML model. If 2, implies pick every 2nd lag term between start to end
 # defined above.
 # Use case-> When a 15-min predictor is just repeated thrice to get a 5-min predictor, you can pick every 3rd value
 # in that time-series to avoid redundancy
-lag_term_step_predictors = np.array([1, 3, 1, 3, 1, 3])
+lag_term_step_predictors = df_file_settings["Lag Term Interval Step"]
 # Currently, the same lead term will be applicable to each response variable, if we have several of 'em
-response_lead_term = 3  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1 for eg
-
-# Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
-# # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
-# that take place over time.
-longitude = -119.4179  # Roughly passing through the center of CA
-time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
+response_lead_term = df_model_settings.loc["RESPONSE_LEAD_TERM", "Value"]  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1 for eg
 
 # The only four response labels allowed are Net_Load_Forecast_Error, Load_Forecast_Error, Solar_Forecast_Error,
 # Wind_Forecast_Error. They can appear in arbitrary order and can be repeated or omitted. Strings other than these four
 # here would result in errors.
-response_col_names = [
-    "Net_Load_Forecast_Error",
-    "Load_Forecast_Error",
-    "Solar_Forecast_Error",
-    "Wind_Forecast_Error",
-]
+response_col_names = {
+    "Net Load": "Net_Load_Forecast_Error",
+    "Load": "Load_Forecast_Error",
+    "Solar": "Solar_Forecast_Error",
+    "Wind": "Wind_Forecast_Error",
+}
 
 # ==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
-def calculate_response_variables(raw_data_df, response_col_names):
+def calculate_response_variables(raw_data_df, response_col_names, df_file_settings):
     """
     Calculates and stores response variable(s) that the ML model will be trained to predict
     :param raw_data_df: Df containing all predictors. Some if not all of them will be used to calculate response(s)
     :param response_col_names: List with column names corresponding to response variables to be calculated in this
                                function
+    :param df_file_settings: Data frame with settings of input data files
     :return: response_values_df - carrying the same data format as raw_data_df but
     with the response variable(s) calculated
     """
     # Initialize df to store response variable(s)
     response_values_df = pd.DataFrame(
-        index=raw_data_df.index, columns=response_col_names
+        index=raw_data_df.index, columns=response_col_names.values()
     )
     # Fill it in per user provided definition of the response variable(s)
     # NOTE: When a response is calculated using a predictor that was pd.NA, you want the response
     # to be pd.NA as well. Thus, be careful with using functions like pd.sum() which yield sum
     # of NAs to be = 0 for example.
 
+    for key in response_col_names.keys():
+
+        if key == "Net Load":
+            # Calculate net load from other response variables once they have been calculated
+            continue
+
+        # Define column name of response variable
+        col_name = response_col_names[key]
+
+        # Get actual/forecast features corresponding to key
+        temp = df_file_settings.loc[df_file_settings["Feature"] == key, "Type"] # Get feature names of actual and forecast
+        actual_feature_name = temp.index[temp == "Actual"][0]
+        forecast_feature_name = temp.index[temp == "Forecast"][0]
+
+        # Calculate forecast error
+        forecast_error = raw_data_df[forecast_feature_name] - raw_data_df[actual_feature_name]
+
+        # Save to response value dataframe
+        response_values_df[col_name] = forecast_error
+
+    # Calculate net load in response value dataframe
+    response_values_df[response_col_names["Net Load"]] = response_values_df[response_col_names["Load"]] - \
+                                                         response_values_df[response_col_names["Wind"]] - \
+                                                         response_values_df[response_col_names["Solar"]]
+
+    """
     load_forecast_error = (
         raw_data_df["Load_RTPD_Forecast"] - raw_data_df["Load_RTD_Forecast"]
     )
@@ -161,6 +196,7 @@ def calculate_response_variables(raw_data_df, response_col_names):
             response_values_df[col_name] = wind_forecast_error
         else:
             raise ValueError("{} is undefined as a response variable!".format(col_name))
+    """
 
     return response_values_df
 
@@ -294,6 +330,21 @@ def infer_time_step(df):
     return time_step
 
 
+def create_wind_persistence_forecast(
+        df_file_settings, response_lead_term
+):
+    actuals_file = df_file_settings.loc[df_file_settings["Feature"] == "Wind"].loc[df_file_settings["Type"] == "Actual"].index
+    print(actuals_file)
+
+    df_actuals = pd.read_csv(
+            os.path.join(dir_str.data_checker_dir, actuals_file),
+            index_col=COL_NAME_FOR_DT,
+            parse_dates=True,
+            infer_datetime_format=True,
+        )
+
+    print(df_actuals.columns)
+
 def main(
     model_name=model_name,
     ML_time_step=ML_time_step,
@@ -304,29 +355,23 @@ def main(
     response_lead_term=response_lead_term,
     longitude=longitude,
     time_difference_from_UTC=time_difference_from_UTC,
+    df_file_settings=df_file_settings,
 ):
     # ==== 0. Read in each time-series feature, output from the data-checker and ensure it matches ML time-step ====
     # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
     dir_str = utility.Dir_Structure(model_name=model_name)
-    path_to_data_checker_outputs = dir_str.data_checker_dir
 
     # Initialize df to hold collected data for ML model
     raw_data_df = pd.DataFrame()
 
     # Iterate over each feature output from data-checker
-    for file in os.listdir(path_to_data_checker_outputs):
-        feature_name = file.strip(".csv")  # identify feature name
-
-        # ignore files based on the list of files to ignore
-        if file in FILES_TO_IGNORE:
-            print("Skipping {}. Not actual inputs for ML model".format(file))
-            continue
+    for feature_name in input_features:
 
         # prompt user about progress
         print("Reading in feature: {}".format(feature_name))
 
         feature_df = pd.read_csv(
-            os.path.join(path_to_data_checker_outputs, file),
+            os.path.join(dir_str.data_checker_dir, feature_name + ".csv"),
             index_col=COL_NAME_FOR_DT,
             parse_dates=True,
             infer_datetime_format=True,
@@ -421,16 +466,24 @@ def main(
     # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
     # for the raw data. These will be used as response variable(s) ====
     print("Calculating response(s)....")
-    response_df = calculate_response_variables(raw_data_df, response_col_names)
+    response_df = calculate_response_variables(raw_data_df, response_col_names, df_file_settings)
     raw_data_df = pd.concat([raw_data_df, response_df], axis=1)
 
     # Revise the lag term array since we are extending the original data
-    num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
+    for feature in raw_data_df.columns:
+        if feature not in lag_term_step_predictors.index:
+            # All other features get same lag term interval start/end/step
+            lag_term_start_predictors.loc[feature] = response_lead_term
+            lag_term_end_predictors.loc[feature] = response_lead_term
+            lag_term_step_predictors.loc[feature] = response_lead_term
+
+    # Revise the lag term array since we are extending the original data
+    #num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
     # for the response term, since there is just one for each category, the start, end, and step all equal to lead
-    response_lead_term_all = np.ones(num_feature_ext, dtype=int) * response_lead_term
-    lag_term_start_all = np.hstack((lag_term_start_predictors, response_lead_term_all))
-    lag_term_end_all = np.hstack((lag_term_end_predictors, response_lead_term_all))
-    lag_term_step_all = np.hstack((lag_term_step_predictors, response_lead_term_all))
+    #response_lead_term_all = np.ones(num_feature_ext, dtype=int) * response_lead_term
+    #lag_term_start_all = np.hstack((lag_term_start_predictors, response_lead_term_all))
+    #lag_term_end_all = np.hstack((lag_term_end_predictors, response_lead_term_all))
+    #lag_term_step_all = np.hstack((lag_term_step_predictors, response_lead_term_all))
 
     # ==== 4. Using vectorized operations to construct lag terms ====
     print("Creating trainval samples for all time-points ....")
@@ -441,18 +494,18 @@ def main(
 
     # Collect lag term predictors for all trainval samples
     # Iterate over each type of lag term predictor
-    for feature_idx, feature_type in enumerate(raw_data_df.columns):
+    for feature in raw_data_df.columns:
 
         # obtain lag term start and end offset, as well as step size for a certain feature
-        lag_term_start = lag_term_start_all[feature_idx]
-        lag_term_end = lag_term_end_all[feature_idx]
-        lag_term_step = lag_term_step_all[feature_idx]
+        lag_term_start = lag_term_start_predictors.loc[feature]
+        lag_term_end = lag_term_end_predictors.loc[feature]
+        lag_term_step = lag_term_step_predictors.loc[feature]
 
         # Iterate over each time step for current predictor type
         for time_step in range(lag_term_start, lag_term_end + 1, lag_term_step):
-            label = "{}_T{:+}".format(feature_type, time_step)
+            label = "{}_T{:+}".format(feature, time_step)
             trainval_data_df[label] = (
-                raw_data_df[feature_type]
+                raw_data_df[feature]
                 .iloc[raw_data_start_idx + time_step : raw_data_end_idx + time_step]
                 .values
             )
@@ -471,7 +524,7 @@ def main(
     # Separate predictors (model inputs) from response (model output(s))
     print("Saving files......")
     response_col_labels = [
-        "{}_T{:+}".format(name, response_lead_term) for name in response_col_names
+        "{}_T{:+}".format(name, response_lead_term) for name in response_col_names.values()
     ]
     trainval_outputs_df = trainval_data_df.loc[:, response_col_labels].copy()
     trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
@@ -479,9 +532,11 @@ def main(
     # Save trainval samples
     trainval_data_df.to_pickle(dir_str.input_trainval_path)
     trainval_outputs_df.to_pickle(dir_str.output_trainval_path)
+
     print("All done!")
 
 
 # run as a script
 if __name__ == "__main__":
+    create_wind_persistence_forecast(df_file_settings, response_lead_term)
     main()
