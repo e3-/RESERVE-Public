@@ -40,4 +40,4 @@ RESCUE model supports multi-objective learning. For example, in addition to prod
 5. Adheres to best practice in statistics: cross validation, normalization, early-stopping, etc.
 
 ## *User Guide:*
-For a user guide, please refer to this [document](https://willdan.box.com/s/ukgey1q1itzpet1db5cp14b6qjmlkqx6)
+For a user guide, please refer to this [document](https://willdan.box.com/s/4ma9j120bfxj55p58jzltqnquto31ari)
