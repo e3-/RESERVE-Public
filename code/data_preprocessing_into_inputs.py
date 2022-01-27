@@ -98,7 +98,8 @@ ANCHOR_DATE = df_model_settings.loc["ANCHOR_DATE", "Value"]
 # Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
 # # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
 # that take place over time.
-longitude = df_model_settings.loc["LONGITUDE", "Value"]  # Roughly passing through the center of CA
+latitude = df_model_settings.loc["LATITUDE", "Value"]
+longitude = df_model_settings.loc["LONGITUDE", "Value"]
 time_difference_from_UTC = df_model_settings.loc["TIME_DIFFERENCE_FROM_UTC", "Value"]  # hours. Timestamps for input data are in PST
 # Currently, the same lead term will be applicable to each response variable, if we have several of 'em
 response_lead_term = df_model_settings.loc["RESPONSE_LEAD_TERM", "Value"]  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1 for eg
@@ -247,6 +248,67 @@ def calculate_calendar_based_predictors(
         days_from_start_date_arr,
     )
 
+def calculate_clear_sky_output(
+        datetime_arr, latitude, longitude, time_difference_from_UTC
+):
+    """
+
+    Args:
+        datetime_arr(pd.DatetimeIndex)
+        latitude(float): Latitude to be used to calculate solar elevation
+        longitude(float): Longitude to be used to calculate local solar time in degrees. East->postive, West->Negative
+        time_difference_from_from_UTC(int/float): Time-difference (in hours) between local time and
+            Universal Coordinated TIme (UTC)
+
+    Returns:
+        clear_sky_output_df: Direct normal irradiation (W/m^2) time series at given latitude and longitude
+
+    Reference for formulae:C.B.Honsberg and S.G.Bowden, “Photovoltaics Education Website,” www.pveducation.org, 2019
+    """
+
+    # Steps leading up to calculation of local solar time
+    day_of_year_arr = datetime_arr.dayofyear
+    # Equation of time (EoT) corrects for eccentricity of earth's orbit and axial tilt
+    solar_day_angle_arr = (360 / 365) * (day_of_year_arr - 81)  # degrees
+    solar_day_angle_in_radians_arr = np.deg2rad(solar_day_angle_arr)  # radians
+    EoT_arr = (
+            9.87 * np.sin(2 * solar_day_angle_in_radians_arr)
+            - 7.53 * np.cos(solar_day_angle_in_radians_arr)
+            - 1.5 * np.sin(solar_day_angle_in_radians_arr)
+    )  # minutes
+    # Time correction sums up time difference due to EoT and longitudinal difference between local time
+    # zone and local longitude
+    local_std_time_meridian = 15 * time_difference_from_UTC  # degrees
+    time_correction_arr = 4 * (longitude - local_std_time_meridian) + EoT_arr  # minutes
+    # Calculate local solar time using local time and time correction calculated above
+    local_solar_time_arr = (
+            datetime_arr.hour + (datetime_arr.minute / 60) + (time_correction_arr / 60)
+    )  # hours
+    # Calculate solar hour angle corresponding to the local solar time
+    solar_hour_angle_arr = 15 * (local_solar_time_arr - 12)  # degrees
+    solar_hour_angle_in_radians_arr = np.deg2rad(solar_hour_angle_arr)  # radians
+
+    # Calculate solar declination
+    solar_declination_arr = -23.5 * np.cos(np.deg2rad((360 / 365) * (day_of_year_arr + 10)))  # degrees
+    solar_declination_in_radians_arr = np.deg2rad(solar_declination_arr)  # radians
+
+    # Calculate solar altitude in each period
+    latitude_in_radians = np.deg2rad(latitude)  # radians
+    solar_elevation_angle_in_radians_arr = np.arcsin(
+        np.sin(solar_declination_in_radians_arr) * np.sin(latitude_in_radians) + \
+        np.cos(solar_declination_in_radians_arr) * np.cos(latitude_in_radians) * np.cos(solar_hour_angle_in_radians_arr)
+    ) # radians
+
+    # Calculate normalized clear sky output (proportional to sin(solar elevation angle))
+    clear_sky_output_arr = np.sin(solar_elevation_angle_in_radians_arr)  # W/m^2
+    # clear_sky_output cannot be negative; correct negative values to 0
+    zeros = np.zeros(len(clear_sky_output_arr)) + 0.001 # Small constant added to avoid divide by zero errors
+    clear_sky_output_arr = np.max([clear_sky_output_arr, zeros], axis=0)
+
+    # Create clear_sky_output dataframe
+    clear_sky_output_df = pd.DataFrame(index=datetime_arr, columns=["clear_sky_output"], data=np.array(clear_sky_output_arr))
+
+    return clear_sky_output_df
 
 def pad_raw_data_w_lag_lead(
     raw_data_df, lag_term_start_predictors, lag_term_end_predictors, response_lead_term
@@ -327,7 +389,10 @@ def infer_time_step(df):
 def create_persistence_forecast(df_data_settings,
                                 feature_type,
                                 response_lead_term=response_lead_term,
-                                ML_time_step=ML_time_step
+                                ML_time_step=ML_time_step,
+                                latitude=latitude,
+                                longitude=longitude,
+                                time_difference_from_UTC=time_difference_from_UTC,
                                 ):
     # START persistence forecasting function
 
@@ -360,14 +425,32 @@ def create_persistence_forecast(df_data_settings,
         # Generate persistence forecast for wind
 
         # Shift actuals forward by # intervals by which response variable (forecast error) leads current time
-        df_forecast = df_actuals.shift(periods=response_lead_term)
+        df_forecast = df_actuals.shift(periods=response_lead_term) # At some point, have user specify forecast horizon
         df_forecast.iloc[0:response_lead_term+1] = df_forecast.iloc[0:response_lead_term+1].bfill()
         # Rationale is that forecast for T + response_lead_term is value of actuals at current time
         # I.e. forecast for current time is value of actuals at T - response_lead_term
 
     elif feature_type == "Solar":
         # Generate persistence forecast for solar
-        pass
+
+        # Shift actuals forward by # intervals by which response variable (forecast error) leads current time
+        df_forecast = df_actuals.shift(periods=response_lead_term)
+        df_forecast.iloc[0:response_lead_term + 1] = df_forecast.iloc[0:response_lead_term + 1].bfill()
+        # Rationale is that forecast for T + response_lead_term is value of actuals at current time
+        # I.e. forecast for current time is value of actuals at T - response_lead_term
+
+        # Adjust forecasts based on expected change in clear sky output
+        clear_sky_output_df = calculate_clear_sky_output(
+            df_actuals.index, latitude, longitude, time_difference_from_UTC
+        )
+
+        # Calculate adjustment factors
+        adjustment_df = clear_sky_output_df/clear_sky_output_df.shift(periods=response_lead_term)
+        adjustment_df.iloc[0:response_lead_term + 1] = adjustment_df.iloc[0:response_lead_term + 1].bfill()
+        # Cap adjustment factors at 2
+        adjustment_df.clip(lower=0.0, upper=2.0, inplace=True)
+        # Apply adjustment factors to forecasts
+        df_forecast[COL_NAME_FOR_VALUE] *= adjustment_df.values.flatten()
 
     # Save forecast
     persistence_forecast_filename = "{}_persistence_forecast_T+{:.0f}.csv".format(
@@ -395,6 +478,7 @@ def main(
     lag_term_step_predictors=lag_term_step_predictors,
     response_lead_term=response_lead_term,
     longitude=longitude,
+    latitude=latitude,
     time_difference_from_UTC=time_difference_from_UTC,
     df_data_settings=df_data_settings,
 ):
