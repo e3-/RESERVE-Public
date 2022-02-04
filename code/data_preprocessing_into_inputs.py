@@ -87,7 +87,7 @@ COL_NAME_DAYS_IDX = "Days_from_Start_Date"
 df_model_settings = pd.read_excel(dir_str.RESERVE_settings_path, sheet_name="RESERVE Settings", index_col=[0])
 df_data_settings = pd.read_excel(dir_str.RESERVE_settings_path, sheet_name="Input Data Settings", index_col=[0])
 # Remove ".csv" tags from lag term dataframe indices
-df_data_settings.index = [f.strip('.csv') for f in df_data_settings.index]
+df_data_settings.index = [f.replace(".csv", "") for f in df_data_settings.index]
 
 # The name of the model version that this data would serve
 model_name = df_model_settings.loc["MODEL_NAME", "Value"]
@@ -162,37 +162,6 @@ def calculate_response_variables(raw_data_df, response_col_names, df_data_settin
     response_values_df[response_col_names["Net Load"]] = response_values_df[response_col_names["Load"]] - \
                                                          response_values_df[response_col_names["Wind"]] - \
                                                          response_values_df[response_col_names["Solar"]]
-
-    """
-    load_forecast_error = (
-        raw_data_df["Load_RTPD_Forecast"] - raw_data_df["Load_RTD_Forecast"]
-    )
-
-    solar_forecast_error = (
-        raw_data_df["Solar_RTPD_Forecast"] - raw_data_df["Solar_RTD_Forecast"]
-    )
-
-    wind_forecast_error = (
-        raw_data_df["Wind_RTPD_Forecast"] - raw_data_df["Wind_RTD_Forecast"]
-    )
-
-    net_load_forecast_error = (
-        load_forecast_error - solar_forecast_error - wind_forecast_error
-    )
-
-    for col_name in response_col_names:
-
-        if "Net_Load_Forecast_Error" == col_name:
-            response_values_df[col_name] = net_load_forecast_error
-        elif "Load_Forecast_Error" == col_name:
-            response_values_df[col_name] = load_forecast_error
-        elif "Solar_Forecast_Error" == col_name:
-            response_values_df[col_name] = solar_forecast_error
-        elif "Wind_Forecast_Error" == col_name:
-            response_values_df[col_name] = wind_forecast_error
-        else:
-            raise ValueError("{} is undefined as a response variable!".format(col_name))
-    """
 
     return response_values_df
 
@@ -648,7 +617,6 @@ def main(
     trainval_outputs_df.to_pickle(dir_str.output_trainval_path)
 
     print("All done!")
-
 
 # run as a script
 if __name__ == "__main__":
