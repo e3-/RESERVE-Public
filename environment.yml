@@ -11,5 +11,7 @@ dependencies:
   - pandas
   - jupyterlab
   - scipy
-  - tensorflow
   - xlrd
+  
+  - pip:
+    - tensorflow                        # Machine learning
