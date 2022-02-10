@@ -1,117 +1,19 @@
-# ############################ LICENSE INFORMATION ############################
-# This file is part of the E3 RESERVE Model.
-
-# Copyright (C) 2021 Energy and Environmental Economics, Inc.
-# For contact information, go to www.ethree.com
-
-# The E3 RESERVE Model is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# The E3 RESERVE Model is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-
-# You should have received a copy of the GNU Affero General Public License
-# along with the E3 RESERVE Model (in the file LICENSE.TXT). If not,
-# see <http://www.gnu.org/licenses/>.
-# #############################################################################
-
-# ==== Change log v1.5 (5/29/2021) ====
-# Added functionality to take raw outputs from the data-checker, ensure each of them match desired temporal
-# resolution and then create the trainval inputs and outputs as before
-
-# ==== Change log v1.4 (4/28/2021) ====
-# Modified script to generate trainval inputs and outputs for 5 min prediction
-# Introduced a variable named lag_term_step_predictors to ensure we can sample every third RTPD term and every RTD term
-# while creating 5 min data. Also added a new RTD_Interval_ID predictor which is 0/1 or 2 based on its position within
-# a RTPD interval
-
-# ==== Change log v1.3 (1/13/2021) ====
-# Enabled script' ability to support both single and multi-objective learning
-# if the multi_obj_learning_flag is set to True, response variables will be net load, load, solar and wind forecast
-# errors in that order. Else, the sole response variable will be the net load forecast error
-
-# ==== Change log v1.2 (11/07/2020) ====
-# Switched to autogeneration of column names in the M by N matrix based on lag and feature name
-# Transposed the M*N matrix in the output. Time is in index and different features are in column
-# Move datetime into the index of the input and output dataframe
-# Unify input and output processing into one for loop to further streamline the code
-# Allow to not include a feature by inputting lag_term_start> lag_term_end
-# Streamline the lag term start and end list into a dictionary for further flexibility
-
-# ==== Change log v1.1 (11/01/2020) ====
-
-# Updated to better facilitate future changes in what M would be - both the broad types of predictors and # of lag
-# terms corresponding to each
-# An additional, important user input is # of lag-terms needed for each predictor
-# A function calculates response at each time-point- again to facilitate future changes
-# Script now reads in 2 files, 1st containing values and 2nd containing binary flags indicating whether data is valid
-# Now, TRUE = Good, FALSE = Bad -> Based on change in data cleaning upstream
-# Some efficiency updates
-
-# ====V1.0 originally created (10/22/2020) ====
-
 import os
 import numpy as np
 import pandas as pd
-import utility
+import pathlib
+from utility import Dir_Structure
+from parse_excel_configs import ExcelConfigs
+from calendrical_predictors import CalendricalPredictors
 
-# ==== User inputs ====
+# ==== Constants  ====
+# Column names used in data-checker output files
+COL_NAME_VALUE = "Interval_Avg_Quantity"
+COL_NAME_VALIDITY = "valid_all_checks"
+COL_NAME_DATETIME = "Datetime_Interval_Start"
 
-# Declare files that data-checker produces but aren't to be used to create inputs for ML
-FILES_TO_IGNORE = ["summary_all_files.csv", "archive"]
-
-# Used to give a consistent day idx sequencing.
-ANCHOR_DATE = "2017-01-01"
-
-# Column names corresponding to those in data-checker output files
-COL_NAME_FOR_VALUE = "Forecast_Interval_Avg_MW"
-COL_NAME_FOR_VALIDITY_FLAG = "valid_all_checks"
-COL_NAME_FOR_DT = "Datetime_Interval_Start"
-
-# The names of several calendar related terms
-COL_NAME_HOUR_ANGLE = "Hour_Angle"
-COL_NAME_DAY_ANGLE = "Day_Angle"
-COL_NAME_DAYS_IDX = "Days_from_Start_Date"
-
-# Temporal characteristics required for making trainval set
-ML_time_step = pd.Timedelta("5T")  # T implies minutes
-
-# the name of the model version that this data would serve
-model_name = "rescue_v1_4_manually_cleaned"
-
-# Define the amount of lag terms that would end up in the input for each feature type
-# +1->Forecast time, 0->Present time, -1->1 time step in past, -2->2 time steps in past...
-# E.g. 1: start = -2, end = -1 implies only include values from 2 past time steps.
-# E.g. 2: start = 0 , end = -1 implies do not include any terms for this feature.
-lag_term_start_predictors = np.array([-6, -6, -6, -6, -6, -6])
-lag_term_end_predictors = np.array([-1, 3, -1, 3, -1, 3])
-# Step size between subsequent lag terms for ML model. If 2, implies pick every 2nd lag term between start to end
-# defined above.
-# Use case-> When a 15-min predictor is just repeated thrice to get a 5-min predictor, you can pick every 3rd value
-# in that time-series to avoid redundancy
-lag_term_step_predictors = np.array([1, 3, 1, 3, 1, 3])
-# Currently, the same lead term will be applicable to each response variable, if we have several of 'em
-response_lead_term = 3  # As a gentle reminder, its relative to present time, T0. So, 1 implies T0+1 for eg
-
-# Those associated with calculating calendar terms - currently solar hour angle and day angle and # of days
-# # of Days will account for increasing nameplate, improving forecast accuracy and other phenomena
-# that take place over time.
-longitude = -119.4179  # Roughly passing through the center of CA
-time_difference_from_UTC = -8  # hours. Timestamps for input data are in PST
-
-# The only four response labels allowed are Net_Load_Forecast_Error, Load_Forecast_Error, Solar_Forecast_Error,
-# Wind_Forecast_Error. They can appear in arbitrary order and can be repeated or omitted. Strings other than these four
-# here would result in errors.
-response_col_names = [
-    "Net_Load_Forecast_Error",
-    "Load_Forecast_Error",
-    "Solar_Forecast_Error",
-    "Wind_Forecast_Error",
-]
+# Input excel name
+INPUT_EXCEL_NAME = pathlib.Path("RSERVE_Input_v1.xlsx")
 
 # ==== Helper functions that don't need user intervention ====
 # User needs to define what the response variable is
@@ -165,323 +67,269 @@ def calculate_response_variables(raw_data_df, response_col_names):
     return response_values_df
 
 
-def calculate_calendar_based_predictors(
-    datetime_arr, longitude, time_difference_from_UTC
-):
+def read_all_timeseries(configs, dir_str):
     """
-    Calculated calendar-based inputs at each time point in the trainval set for ML model. Currently includes solar hour,
-    day angle and # of days passed since a start-date which can either be a user input or the first day in the trainval
-    dataset.
 
-    Inputs:
-    datetime_arr(pd.DatetimeIndex)
-    longitude(float): Longitude to be used to calculate local solar time in degrees. East->postive, West->Negative
-    time_difference_from_from_UTC(int/float): Time-difference (in hours) between local time and
-    Universal Coordinated TIme (UTC)
+    Returns:
 
-    Output:
-    solar_hour_angle_arr (Array of floats): Hour angle in degrees for each timepoint in datetime_arr
-    solar_day_angle_arr (Array of floats): Day angle in degrees for each timepoint in datetime_arr
-    days_from_start_date_arr (Array of ints): Days passed since a particular start date, defined for each timepoint in datetime_arr
-
-    Reference for formulae:C.B.Honsberg and S.G.Bowden, “Photovoltaics Education Website,” www.pveducation.org, 2019
     """
-    # Steps leading up to calculation of local solar time
-    day_of_year_arr = datetime_arr.dayofyear
-    # Equation of time (EoT) corrects for eccentricity of earth's orbit and axial tilt
-    solar_day_angle_arr = (360 / 365) * (day_of_year_arr - 81)  # degrees
-    solar_day_angle_in_radians_arr = np.deg2rad(solar_day_angle_arr)  # radians
-    EoT_arr = (
-        9.87 * np.sin(2 * solar_day_angle_in_radians_arr)
-        - 7.53 * np.cos(solar_day_angle_in_radians_arr)
-        - 1.5 * np.sin(solar_day_angle_in_radians_arr)
-    )  # minutes
-    # Time correction sums up time difference due to EoT and longitudinal difference between local time
-    # zone and local longitude
-    local_std_time_meridian = 15 * time_difference_from_UTC  # degrees
-    time_correction_arr = 4 * (longitude - local_std_time_meridian) + EoT_arr  # minutes
-    # Calculate local solar time using local time and time correction calculated above
-    local_solar_time_arr = (
-        datetime_arr.hour + (datetime_arr.minute / 60) + (time_correction_arr / 60)
-    )  # hours
-    # Calculate solar hour angle corresponding to the local solar time
-    solar_hour_angle_arr = 15 * (local_solar_time_arr - 12)  # degrees
+    ts_attrs = configs.timeseries_attributes  # alias
 
-    # Calculate days passed since start date
-    days_from_start_date_arr = (datetime_arr - pd.Timestamp(ANCHOR_DATE)).days
+    # Reading in time series and matching them to the frequency needed
+    ts_data_df = pd.DataFrame()  # empty container for all features and sub-features
+    # Iterate over each feature output from data-checker
+    for feature_name in ts_attrs.index:
 
-    return (
-        solar_hour_angle_arr,
-        solar_day_angle_arr,
-        days_from_start_date_arr,
-    )
+        print("Reading in " + feature_name + "...")
+        feature_df = pd.read_csv(
+            os.path.join(dir_str.data_checker_dir, ts_attrs.loc[feature_name, "File Name"]),
+            index_col=COL_NAME_DATETIME,
+            parse_dates=True,
+        )
+        # match the feature frequency with the required frequency of ML problem
+        ts_data_one = match_frequency(feature_df, feature_name, configs.sample_interval)
+
+        if ts_data_one.shape[1] >= 2:  # when sub-features has been made
+            # The match frequency process sometimes change the name and amount of time series
+            for i, term_configs in enumerate([configs.lag_term_configs, configs.lead_term_configs]):
+                col_to_check = "Is Input?" if i == 0 else "Is Output?"
+                if ts_attrs.loc[feature_name, col_to_check]:
+                    term_configs.loc[ts_data_one.columns] = term_configs[feature_name].values  # add the new
+                    term_configs.drop(feature_name, axis=0, inplace=True)  # drop the old
+
+        # collect each individual feature or sub-feature into the total timeseries data dataframe
+        ts_data_df = pd.concat([ts_data_df, ts_data_one], axis=1, join="outer")
+
+    return ts_data_df
 
 
-def pad_raw_data_w_lag_lead(
-    raw_data_df, lag_term_start_predictors, lag_term_end_predictors, response_lead_term
-):
+def match_frequency(feature_df, feature_name, sample_interval):
+    """
+    Unstack or pad the original feature in order to achieve desired frequency.
+
+    Args:
+        feature_df: pd.DataFrame. the dataframe of the feature read in from hard drive, following data checker output
+        format
+        feature_name: str. Name of the feature
+        sample_interval: int. The time step of the ML model expressed in seconds.
+
+    Returns:
+        ts_data_srs: pd.Series of pd.DataFrame. Time series data
+
+    """
+
+    # Embed info about validity, so we can use the ts_data_df alone going forward
+    feature_df.loc[~feature_df[COL_NAME_VALIDITY], COL_NAME_VALUE] = None
+    # Rename from generic col name to feature-specific name
+    ts_data_one = feature_df[COL_NAME_VALUE].rename(feature_name)
+
+    # Determine time-step size in the data for this feature
+    feature_freq = pd.infer_freq(ts_data_one.index)
+    assert feature_freq is not None, "Raw data does not have equally spaced index! Cannot discern Frequency!"
+
+    # If inferred frequency is 1 of something, say 1 min or 1 H, it will just be represented
+    # as "T" or "H". Need to turn it into "1T" or "1H" to interpret as a number using the Timedelta function
+    if feature_freq[0].isdigit():
+        feature_time_step = pd.Timedelta(feature_freq)
+    else:
+        feature_time_step = pd.Timedelta("1" + feature_freq)
+
+    # TODO: The script takes care of frequency mismatch, but not starting time mismatch.
+
+    # ==== Option 1 of 3 ====
+    # If the feature time-step size matches, place the feature into the ML inputs df without any changes
+    if feature_time_step == sample_interval:
+        ts_data_one = ts_data_one.to_frame()
+
+    # ==== Option 2 of 3 ====
+    # If the input is more frequent than desired, create multiple features
+    # E.g. Given 5-min features and ML inputs are on a 15-min resolution. Then, create three 15-minutely features
+    # out of each one of the 5-min feature currently being assessed
+    elif feature_time_step < sample_interval:
+        # calculate number of sub steps and organize feature frequency into sth that can be obtained
+        # through dividing ML time step with an integer
+        num_sub_steps = sample_interval // feature_time_step
+        ts_data_one = ts_data_one.resample(sample_interval / num_sub_steps).nearest()
+
+        # append each of the sub feature into the data df
+        sub_feature_df = pd.DataFrame()
+        for i in range(num_sub_steps):
+            # the reason to reset index is that sometimes each sub feature's length can differ by 1
+            sub_feature_srs = ts_data_one.iloc[i::num_sub_steps].reset_index(drop=True)
+            sub_feature_srs = sub_feature_srs.rename("{}_sub_step_{}".format(feature_name, i))
+            sub_feature_df = pd.concat([sub_feature_df, sub_feature_srs], axis=1, join="outer")
+
+        ts_data_one = sub_feature_df
+
+    # ==== Option 3 of 3 ====
+    # If feature frequency is lower than desired, pad the series into ML frequency
+    else:
+        ts_data_one = ts_data_one.resample(sample_interval).nearest().to_frame()
+
+    return ts_data_one
+
+
+def pad_data_w_buffer(ts_data_df, lag_term_configs, lead_term_configs, sample_interval):
     """
     A function to pad the raw data files in both the lag (backwards) and the lead (forwards) direction
     As the lag terms used in input downstream make use of vectorized calculation. A uniform padding allows
-    easier manipulation of the data and constant dataframe size.
+    easier manipulation of the data and constant data frame size.
 
-    Input:
-    raw_data_df: original raw data dataframe
-    lag_term_start_predictors: the start of the lag terms for the predictors/features
-    lag_term_end_predictors: the end of the lag terms used as the predictors/features
-    response_lead_term: the amount of lead time (expressed in interval) for the response variable
+    Args:
+        ts_data_df: pd.DataFrame of (M,N). M being number of time points, N being number of features
+        lag_term_configs: pd.DataFrame of (I,3). Configuration of lag terms for input features
+        lead_term_configs: pd.DataFrame of (O,3). Configuration of lead terms for model responses
+        sample_interval: pd.Timedelta. Interval between training/testing samples
 
-    Output:
-    raw_data_df: The origianal raw data dataframe padded with enough NaNs in lag and lead direction
-    raw_data_start_idx: in the now padded dataframe, where does the raw data actually start
-    raw_data_end_idx: in the now padded dataframe, where does the raw data actually ends
+    Returns:
+        ts_data_df: The feature data frame padded with enough NaNs in lag and lead direction
     """
 
     # Calculate the maximum amount of lag and lead to determine length of padding
-    raw_data_start_time, raw_data_end_time = raw_data_df.index[0], raw_data_df.index[-1]
-    max_num_lag_terms = min([lag_term_start_predictors.min(), 0])
-    max_num_lead_terms = max([lag_term_end_predictors.max(), 0, response_lead_term])
+    max_lag_terms = min([lag_term_configs["Start"].min(), 0, lead_term_configs["Start"].min()])
+    max_lead_terms = max([lag_term_configs["End"].max(), 0, lead_term_configs["End"].max()])
 
-    # Discern the raw data's inherent frequency. If it's inconsistent then all is moot.
-    raw_data_freq = pd.infer_freq(raw_data_df.index)
-    assert (
-        raw_data_freq is not None
-    ), "Raw data does not have equally spaced index! Cannot discern Frequency!"
     # Create padding for lag and lead terms
-    lag_terms_timeshift = pd.Series(np.arange(max_num_lag_terms, 0)) * pd.Timedelta(
-        raw_data_freq
-    )
-    lead_terms_timeshift = pd.Series(
-        np.arange(1, max_num_lead_terms + 1)
-    ) * pd.Timedelta(raw_data_freq)
-    raw_data_lag_pad = pd.DataFrame(
-        index=raw_data_start_time + lag_terms_timeshift, columns=raw_data_df.columns
-    )
-    raw_data_lead_pad = pd.DataFrame(
-        index=raw_data_end_time + lead_terms_timeshift, columns=raw_data_df.columns
-    )
+    lag_terms_time_shift = np.arange(max_lag_terms, 0) * sample_interval
+    lead_terms_time_shift = np.arange(1, max_lead_terms + 1) * sample_interval
+    lag_pad = pd.DataFrame(index=ts_data_df.index[0] + lag_terms_time_shift, columns=ts_data_df.columns)
+    lead_pad = pd.DataFrame(index=ts_data_df.index[-1] + lead_terms_time_shift, columns=ts_data_df.columns)
 
     # Append the padding to the raw data frame
-    raw_data_df = pd.concat([raw_data_lag_pad, raw_data_df, raw_data_lead_pad])
-    # calculate the start and end idx of the raw_data in the padded dataframe
-    raw_data_start_idx, raw_data_end_idx = (
-        -max_num_lag_terms,
-        raw_data_df.shape[0] - max_num_lead_terms,
-    )
+    padded_ts_data = pd.concat([lag_pad, ts_data_df, lead_pad])
 
-    return raw_data_df, raw_data_start_idx, raw_data_end_idx
+    return padded_ts_data
 
 
-def infer_time_step(df):
+def generate_lag_and_lead_terms(ts_data_df, lag_term_configs, lead_term_configs):
+
+    # Initialize collectors to hold (and later save) trainval and inf data in
+    io_data_df = pd.DataFrame(None, index=ts_data_df.index)
+    ts_index = ts_data_df.index
+    is_feature_input = pd.Series(None, dtype=bool)
+    # Iterate over each feature, including both predictors and responses, to create time shifted input and outputs
+    for i, term_configs in enumerate([lag_term_configs, lead_term_configs]):
+        is_input = True if i == 0 else False  # all lag terms are considered inputs, while lead_term are outputs
+        term_configs = term_configs.astype("int")  # force the integer type as they are basis for range
+
+        for feature_name in term_configs.index:
+
+            # obtain lag term start and end offset, as well as step size for a certain feature
+            start, end, step = term_configs.loc[feature_name].iloc[:3]
+
+            # Iterate over each time step for current predictor type
+            for time_step in range(start, end + 1, step):
+                label = "{}_T{:+}".format(feature_name, time_step)
+                io_data_df[label] = None  # initialize feature values
+                if time_step > 0:
+                    io_data_df.loc[ts_index[:-time_step], label] = ts_data_df.loc[
+                        ts_index[time_step:], feature_name
+                    ].values
+                elif time_step < 0:
+                    io_data_df.loc[ts_index[-time_step:], label] = ts_data_df.loc[
+                        ts_index[:time_step], feature_name
+                    ].values
+                else:
+                    io_data_df[label] = ts_data_df[feature_name]
+
+                # record if this is an input or output they are inputs
+                is_feature_input.loc[label] = is_input
+
+    return io_data_df, is_feature_input
+
+
+def create_trainval_test_infer_sets(io_data_df, starts_and_ends, is_feature_input, data_dir):
+    """
+    Takes the combined data set and separates out the trainval, test and inference sets
+
+    Input:
+    io_data_df: pd.DataFrame of [M, N2]. M being the number of time points, and N2 being the number of features derived
+    from the time series. It holds predictors and response variables, which have all lag and lead terms generated
+    starts_and_ends: pd.DataFrame of [M, N2] the start and end defined for the training, testing and inference sets.
+    is_feature_input: pd.Series of [N2] bool. A pandas series recording if each feature is an input
+
+    Output:
+        None. The created input and output files are directly saved to hard drive
+
     """
 
-    Args:
-        df: pd.DataFrame. A dataframe with an index that presumably have an innate frequency. Augment the pd.infer_freq
-         function in the pandas package and make the return of type pd.Timedelta
+    # Validate training and testing set should be non-overlapping
+    if (
+        starts_and_ends.loc["test", "Start Time"]
+        < starts_and_ends.loc["trainval", "Start Time"]
+        < starts_and_ends.loc["test", "End Time"]
+    ) or (
+        starts_and_ends.loc["test", "Start Time"]
+        < starts_and_ends.loc["trainval", "End Time"]
+        < starts_and_ends.loc["test", "End Time"]
+    ):
+        raise ValueError("There is overlap between training and testing data. BAD!")
 
-    Returns: time_step: pd.Timedelta. The period of time between two rows of the input df.
-
-    """
-    # Determine time-step size in the data for this feature
-    freq = pd.infer_freq(df.index)
-    # If inferred frequency is 1 of something, say 1 min or 1 H, it will just be represented
-    # as "T" or "H". Need to turn it into "1T" or "1H" to interpret as a number using the Timedelta function
-    if freq[0].isdigit():
-        time_step = pd.Timedelta(freq)
-    else:
-        time_step = pd.Timedelta("1" + freq)
-
-    return time_step
-
-
-def main(
-    model_name=model_name,
-    ML_time_step=ML_time_step,
-    response_col_names=response_col_names,
-    lag_term_start_predictors=lag_term_start_predictors,
-    lag_term_end_predictors=lag_term_end_predictors,
-    lag_term_step_predictors=lag_term_step_predictors,
-    response_lead_term=response_lead_term,
-    longitude=longitude,
-    time_difference_from_UTC=time_difference_from_UTC,
-):
-    # ==== 0. Read in each time-series feature, output from the data-checker and ensure it matches ML time-step ====
-    # Paths to read raw data files from and to store outputs in. Defined in the dir_structure class in utility
-    dir_str = utility.Dir_Structure(model_name=model_name)
-    path_to_data_checker_outputs = dir_str.data_checker_dir
-
-    # Initialize df to hold collected data for ML model
-    raw_data_df = pd.DataFrame()
-
-    # Iterate over each feature output from data-checker
-    for file in os.listdir(path_to_data_checker_outputs):
-        feature_name = file.strip(".csv")  # identify feature name
-
-        # ignore files based on the list of files to ignore
-        if file in FILES_TO_IGNORE:
-            print("Skipping {}. Not actual inputs for ML model".format(file))
-            continue
-
-        # prompt user about progress
-        print("Reading in feature: {}".format(feature_name))
-
-        feature_df = pd.read_csv(
-            os.path.join(path_to_data_checker_outputs, file),
-            index_col=COL_NAME_FOR_DT,
-            parse_dates=True,
-            infer_datetime_format=True,
+    # Separate train/inf set from the combined set
+    for set_name in starts_and_ends.index:
+        set_range = (starts_and_ends.loc[set_name, "Start Time"] <= io_data_df.index) & (
+            io_data_df.index < starts_and_ends.loc[set_name, "End Time"]
         )
+        set_data_df = io_data_df.loc[set_range].copy()
 
-        # Replace invalid rows with None and only keep the value column
-        feature_df_validity = feature_df[COL_NAME_FOR_VALIDITY_FLAG]
-        feature_df.loc[~feature_df_validity, COL_NAME_FOR_VALUE] = None
-        feature_df = feature_df[COL_NAME_FOR_VALUE].rename(feature_name)
+        # Inference set will not have a response. Delete the response columns
+        if set_name == "infer":
+            set_data_df = set_data_df.drop(columns=set_data_df.columns[~is_feature_input])
 
-        # Determine time step interval for this feature
-        feature_time_step = infer_time_step(feature_df)
+        # summarize data validity and drop invalid samples
+        print("{} of {} {} samples are valid".format(set_data_df.dropna().shape[0], set_data_df.shape[0], set_name))
+        set_data_df = set_data_df.dropna()
 
-        # ==== Option 1 of 3 ====
-        # If the feature time-step matches that needed for ML inputs, do nothing
+        for input_or_output in ["input", "output"]:
+            if (set_name == "infer") and (input_or_output == "output"):
+                continue
+            else:
+                is_looking_for_input = input_or_output == "input"
+                # Only retain trainval samples wherein predictor(s) and response(s) are both valid
+                set_io_df = set_data_df[io_data_df.columns[is_looking_for_input == is_feature_input]]
 
-        # ==== Option 2 of 3 ====
-        # If the time step is shorter/more frequent than that desired, create multiple features for each ML time step
-        # Say we have 5-min features and ML inputs are on a 15-min resolution. Then, create three 15-min feature stream
-        # from this 5-min feature stream corresponding to the three 5 minute intervals in the 15 minute.
-        if feature_time_step < ML_time_step:
-            assert (ML_time_step % feature_time_step).total_seconds() == 0, (
-                "When ML model's temporal time step is longer than that of the raw feature data, it must be multitudes "
-                "of the feature timestep. Not the case for {}".format(feature_name)
-            )
+                # save to hard drive
+                filename = "{}_{}.pkl".format(input_or_output, set_name)
+                if len(set_io_df.index) >= 1:  # if there is no data then don't print out anything
+                    set_io_df.to_pickle(data_dir / filename)
+                else:
+                    print("{} for {} set is empty. Please double check!".format(input_or_output, set_name))
 
-            num_substeps = int(ML_time_step / feature_time_step)
-            # Create new index and labels for the additional features to be created
-            feature_name_substep_idx = [
-                "{}_{}".format(feature_name, i) for i in range(num_substeps)
-            ]
-            feature_name_substep_idx = np.tile(
-                feature_name_substep_idx, (feature_df.shape[0] - 1) // num_substeps + 1
-            )
-            ML_dt_index = np.repeat(feature_df.index[::num_substeps], num_substeps)
-            # These will first be turned into a multi-level index for the feature_df and then be "unstacked" to have the
-            # timestamps be the sole index and have the unique entries in feature_name_substep_idx become the columns
-            feature_df.index = pd.MultiIndex.from_arrays(
-                [
-                    ML_dt_index[: feature_df.size],
-                    feature_name_substep_idx[: feature_df.size],
-                ]
-            )
+    return None
 
-        # ==== Option 3 of 3 ====
-        # If feature time-step is longer than desired, replicate feature
-        # For eg, if ML time step is 15 min and feature df has values on hourly resolution, we will repeat the feature
-        # value 4 times, once for each 15 min interval in the given hour
-        else:
-            assert (feature_time_step % ML_time_step).total_seconds() == 0, (
-                "When ML model's temporal time step is shorter than that of the raw feature data, it must be a factor "
-                "of the feature time step. Not the case for {}".format(feature_name)
-            )
-            feature_df = feature_df.resample(ML_time_step).pad()
 
-        # merge the current feature with the rest of the features
-        raw_data_df = pd.concat((raw_data_df, feature_df), axis=1, join="outer")
+def main(dir_str):
 
-    # ==== 1. Pad raw date for downstream manipulation ====
+    print("=== Step 1 of 5, Reading in model inputs and time series from {} ===".format(INPUT_EXCEL_NAME))
+    configs = ExcelConfigs(INPUT_EXCEL_NAME.resolve())
+    # Paths to read time files from. Defined in the dir_structure class in utility
+    dir_str = Dir_Structure(model_name= configs.model_name)
+    # read in all timeseries files
+    ts_data_df = read_all_timeseries(dir_str, configs)
+
+    print("=== Step 2 of 5. Calculating derived features, applies to RESERVE more than RECLAIM ===")
+    # configs.lead_term_config.append(pd.DataFrame([1, 2, 2], index=cal_predictors_df))
+
+    print("=== Step 3 of 5, Calculating calendar-based predictors === ")
+    cal_predictors = CalendricalPredictors(ts_data_df.index, configs)
+    ts_data_df = pd.concat([ts_data_df, cal_predictors.data], axis=1, join="outer")
+    configs.lag_term_configs = configs.lag_term_configs.append(cal_predictors.cal_term_configs).astype("int")
+
+    print("=== Step 4 of 5, Using vectorized operations to construct lag and lead terms ===")
     # Pad the raw data with NaNs in both the lag and lead direction for downstream data manipulation
-    raw_data_df, raw_data_start_idx, raw_data_end_idx = pad_raw_data_w_lag_lead(
-        raw_data_df,
-        lag_term_start_predictors,
-        lag_term_end_predictors,
-        response_lead_term,
+    ts_data_df = pad_data_w_buffer(
+        ts_data_df, configs.lag_term_configs, configs.lead_term_configs, configs.sample_interval
+    )
+    io_data_df, is_feature_input = generate_lag_and_lead_terms(
+        ts_data_df, configs.lag_term_configs, configs.lead_term_configs
     )
 
-    # ==== 2. Add in calendar terms for the raw data ====
-    print("Calculating calendar-based predictors....")
-    (
-        raw_data_df[COL_NAME_HOUR_ANGLE],
-        raw_data_df[COL_NAME_DAY_ANGLE],
-        raw_data_df[COL_NAME_DAYS_IDX],
-    ) = calculate_calendar_based_predictors(
-        raw_data_df.index,
-        longitude,
-        time_difference_from_UTC,
-    )
+    print("=== Step 5 of 5. Separate trainval, test and inference sets, and save to hard drive ===")
+    create_trainval_test_infer_sets(io_data_df, configs.starts_and_ends, is_feature_input, dir_str.reclaim_data_dir)
 
-    ### CAISO specific
-    # Calculate ML interval ids w.r.t each rtpd interval. In this case we often set ML interval = RTD interval
-    # For eg, rtd interval starting 12:00 = 0, 12:05 = 1, 12:10 = 2, if rtpd interval spans from 12:00 to 12:15
-    # this feature is meaningless when the ML time step is just RTPD interval
-    COL_NAME_INTERVAL_ID = "5_Min_Interval_ID"
-
-    if ML_time_step != pd.Timedelta("15T"):
-        rtpd_to_ML_multitude = int(pd.Timedelta("15T") / ML_time_step)
-        raw_data_df[COL_NAME_INTERVAL_ID] = (
-            (raw_data_df.index - pd.Timestamp(ANCHOR_DATE)) // ML_time_step
-        ) % rtpd_to_ML_multitude
-
-    # ==== 3. Add in net-load forecast difference and load, solar, wind (if multi-obj) forecast difference
-    # for the raw data. These will be used as response variable(s) ====
-    print("Calculating response(s)....")
-    response_df = calculate_response_variables(raw_data_df, response_col_names)
-    raw_data_df = pd.concat([raw_data_df, response_df], axis=1)
-
-    # Revise the lag term array since we are extending the original data
-    num_feature_ext = len(raw_data_df.columns) - len(lag_term_start_predictors)
-    # for the response term, since there is just one for each category, the start, end, and step all equal to lead
-    response_lead_term_all = np.ones(num_feature_ext, dtype=int) * response_lead_term
-    lag_term_start_all = np.hstack((lag_term_start_predictors, response_lead_term_all))
-    lag_term_end_all = np.hstack((lag_term_end_predictors, response_lead_term_all))
-    lag_term_step_all = np.hstack((lag_term_step_predictors, response_lead_term_all))
-
-    # ==== 4. Using vectorized operations to construct lag terms ====
-    print("Creating trainval samples for all time-points ....")
-    # Initialize collectors to hold (and later save) trainval data in
-    trainval_data_df = pd.DataFrame(
-        None, index=raw_data_df.index[raw_data_start_idx:raw_data_end_idx]
-    )
-
-    # Collect lag term predictors for all trainval samples
-    # Iterate over each type of lag term predictor
-    for feature_idx, feature_type in enumerate(raw_data_df.columns):
-
-        # obtain lag term start and end offset, as well as step size for a certain feature
-        lag_term_start = lag_term_start_all[feature_idx]
-        lag_term_end = lag_term_end_all[feature_idx]
-        lag_term_step = lag_term_step_all[feature_idx]
-
-        # Iterate over each time step for current predictor type
-        for time_step in range(lag_term_start, lag_term_end + 1, lag_term_step):
-            label = "{}_T{:+}".format(feature_type, time_step)
-            trainval_data_df[label] = (
-                raw_data_df[feature_type]
-                .iloc[raw_data_start_idx + time_step : raw_data_end_idx + time_step]
-                .values
-            )
-
-    # ==== 5. Drop invalid terms and store to hard drive ====
-    # Identify trainval samples wherein all lag term of features and responses are valid
-    # If any entry is pd.NA, it is invalid
-    print(
-        "{} of {} trainval samples are valid".format(
-            trainval_data_df.notna().all(axis=1).sum(), trainval_data_df.shape[0]
-        )
-    )
-    # Only retain trainval samples wherein predictor(s) and response(s) are both valid
-    trainval_data_df = trainval_data_df.dropna()
-
-    # Separate predictors (model inputs) from response (model output(s))
-    print("Saving files......")
-    response_col_labels = [
-        "{}_T{:+}".format(name, response_lead_term) for name in response_col_names
-    ]
-    trainval_outputs_df = trainval_data_df.loc[:, response_col_labels].copy()
-    trainval_data_df = trainval_data_df.drop(columns=trainval_outputs_df.columns)
-
-    # Save trainval samples
-    trainval_data_df.to_pickle(dir_str.input_trainval_path)
-    trainval_outputs_df.to_pickle(dir_str.output_trainval_path)
     print("All done!")
 
 
 # run as a script
 if __name__ == "__main__":
-    main()
+    main(dir_str)
