@@ -5,13 +5,14 @@ channels:
   - conda-forge
 
 dependencies:
-  - python=3.7
+  - python >= 3.7
   - matplotlib
   - numpy
   - pandas
   - jupyterlab
   - scipy
   - xlrd
+  - pvlib-python          # Package from Sandia NL for solar resource related functions
   
   - pip:
-    - tensorflow                        # Machine learning
+    - tensorflow          # Machine learning
