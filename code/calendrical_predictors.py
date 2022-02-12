@@ -37,7 +37,10 @@ class CalendricalPredictors(object):
         self.cos_solar_azimuth_angle = None
         self.sin_solar_zenith_angle = None
         self.cos_solar_zenith_angle = None
-        non_feature_attrs = geo_params + ["dt_series", "data"]  # the attributes that doesn't end up being features
+        non_feature_attrs = geo_params + [
+            "dt_series",
+            "data",
+        ]  # the attributes that doesn't end up being features
 
         for temporal_feature in configs.temporal_features.index:
             if configs.temporal_features.loc[temporal_feature, "To include?"]:
@@ -53,28 +56,42 @@ class CalendricalPredictors(object):
                     self.data = pd.concat([self.data, attribute_data], axis=1)
 
         # generation the lag configuration for the calendar terms
-        self.cal_term_configs = pd.DataFrame(1, index=self.data.columns, columns=configs.lag_term_configs.columns)
-        self.cal_term_configs *= [0, 0, 1]  # no reason to include lagged version of the calendar terms
+        self.cal_term_configs = pd.DataFrame(
+            1, index=self.data.columns, columns=configs.lag_term_configs.columns
+        )
+        self.cal_term_configs *= [
+            0,
+            0,
+            1,
+        ]  # no reason to include lagged version of the calendar terms
 
     def get_holiday(self):
         """
         See if the datetime falls on a holiday
         """
-        holidays = calendar().holidays(start=self.dt_series.min(), end=self.dt_series.max())
+        holidays = calendar().holidays(
+            start=self.dt_series.min(), end=self.dt_series.max()
+        )
         self.is_holiday = self.dt_series.isin(holidays)
 
     def get_day_of_week(self):
         # Day of week indicator. 7 binary indicator variables, one each for Mon to Sun
         day_of_week = self.dt_series.day_name()
-        self.is_day_of_week = pd.get_dummies(day_of_week, prefix="is").set_index(self.dt_series)
+        self.is_day_of_week = pd.get_dummies(day_of_week, prefix="is").set_index(
+            self.dt_series
+        )
 
     def get_revolution_angle(self):
         """
         Revolution angle corresponds to day of year, transformed to radians and in turn sine and cosine.
         """
         # The grammar here is a bit hacky, but the second subtraction sign is overloaded with pd syntax to move dates
-        time_from_year_start = self.dt_series - (self.dt_series - pd.offsets.YearBegin())
-        time_in_a_year = (self.dt_series + pd.offsets.YearBegin()) - (self.dt_series - pd.offsets.YearBegin())
+        time_from_year_start = self.dt_series - (
+            self.dt_series - pd.offsets.YearBegin()
+        )
+        time_in_a_year = (self.dt_series + pd.offsets.YearBegin()) - (
+            self.dt_series - pd.offsets.YearBegin()
+        )
 
         # calculate revolution angle and sine and cosine values
         rev_angle = time_from_year_start / time_in_a_year * 2 * np.pi
@@ -99,8 +116,83 @@ class CalendricalPredictors(object):
         self.elapsed_time = (self.dt_series - START_DATE).total_seconds() / 3600 / 24
 
     def get_solar_position(self):
-        position_df = pvlib.solarposition.get_solarposition(self.dt_series, self.latitude, self.longitude)
+        position_df = pvlib.solarposition.get_solarposition(
+            self.dt_series, self.latitude, self.longitude
+        )
         self.sin_solar_zenith_angle = np.sin(position_df["apparent_zenith"])
         self.cos_solar_zenith_angle = np.cos(position_df["apparent_zenith"])
         self.sin_solar_azimuth_angle = np.sin(position_df["azimuth"])
         self.cos_solar_azimuth_angle = np.cos(position_df["azimuth"])
+
+
+def calculate_clear_sky_output(
+    datetime_arr, latitude, longitude, time_difference_from_UTC
+):
+    """
+
+    Args:
+        datetime_arr(pd.DatetimeIndex)
+        latitude(float): Latitude to be used to calculate solar elevation
+        longitude(float): Longitude to be used to calculate local solar time in degrees. East->postive, West->Negative
+        time_difference_from_UTC(int/float): Time-difference (in hours) between local time and
+            Universal Coordinated TIme (UTC)
+
+    Returns:
+        clear_sky_output_df: Direct normal irradiation (W/m^2) time series at given latitude and longitude
+
+    Reference for formulae:C.B.Honsberg and S.G.Bowden, “Photovoltaics Education Website,” www.pveducation.org, 2019
+    """
+
+    # Steps leading up to calculation of local solar time
+    day_of_year_arr = datetime_arr.dayofyear
+    # Equation of time (EoT) corrects for eccentricity of earth's orbit and axial tilt
+    solar_day_angle_arr = (360 / 365) * (day_of_year_arr - 81)  # degrees
+    solar_day_angle_in_radians_arr = np.deg2rad(solar_day_angle_arr)  # radians
+    EoT_arr = (
+        9.87 * np.sin(2 * solar_day_angle_in_radians_arr)
+        - 7.53 * np.cos(solar_day_angle_in_radians_arr)
+        - 1.5 * np.sin(solar_day_angle_in_radians_arr)
+    )  # minutes
+    # Time correction sums up time difference due to EoT and longitudinal difference between local time
+    # zone and local longitude
+    local_std_time_meridian = 15 * time_difference_from_UTC  # degrees
+    time_correction_arr = 4 * (longitude - local_std_time_meridian) + EoT_arr  # minutes
+    # Calculate local solar time using local time and time correction calculated above
+    local_solar_time_arr = (
+        datetime_arr.hour + (datetime_arr.minute / 60) + (time_correction_arr / 60)
+    )  # hours
+    # Calculate solar hour angle corresponding to the local solar time
+    solar_hour_angle_arr = 15 * (local_solar_time_arr - 12)  # degrees
+    solar_hour_angle_in_radians_arr = np.deg2rad(solar_hour_angle_arr)  # radians
+
+    # Calculate solar declination
+    solar_declination_arr = -23.5 * np.cos(
+        np.deg2rad((360 / 365) * (day_of_year_arr + 10))
+    )  # degrees
+    solar_declination_in_radians_arr = np.deg2rad(solar_declination_arr)  # radians
+
+    # Calculate solar altitude in each period
+    latitude_in_radians = np.deg2rad(latitude)  # radians
+    solar_elevation_angle_in_radians_arr = np.arcsin(
+        np.sin(solar_declination_in_radians_arr) * np.sin(latitude_in_radians)
+        + np.cos(solar_declination_in_radians_arr)
+        * np.cos(latitude_in_radians)
+        * np.cos(solar_hour_angle_in_radians_arr)
+    )  # radians
+
+    # Calculate normalized clear sky output (proportional to sin(solar elevation angle))
+    clear_sky_output_arr = np.sin(solar_elevation_angle_in_radians_arr)  # W/m^2
+    # clear_sky_output cannot be negative; correct negative values to 0
+    zeros = (
+        np.zeros(len(clear_sky_output_arr)) + 0.001
+    )  # Small constant added to avoid divide by zero errors
+    clear_sky_output_arr = np.max([clear_sky_output_arr, zeros], axis=0)
+
+    # Create clear_sky_output dataframe
+    clear_sky_output_df = pd.DataFrame(
+        index=datetime_arr,
+        columns=["clear_sky_output"],
+        data=np.array(clear_sky_output_arr),
+    )
+
+    return clear_sky_output_df
