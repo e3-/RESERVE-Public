@@ -19,63 +19,56 @@
 # see <http://www.gnu.org/licenses/>.
 # #############################################################################
 
-import os
+from pathlib import Path
 import shutil
 
 
-class Dir_Structure:
+class DirStructure:
     """Directory and file structure of the RESCUE model."""
 
-    def __init__(self, code_dir=os.getcwd(), model_name="rescue"):
+    def __init__(self, code_dir=Path.cwd(), model_name="rescue"):
         """Initialize directory structure based on scenario name
         Args:
-            code_directory (str): Path to `code` directory where all python code is located
+            code_dir (str): Path to `code` directory where all python code is located
             model_name (str): specific name of the model. Recommendation: RESCUE + VER number
         """
         self.model_name = model_name
         self.code_dir = code_dir
 
         # Define paths to directories
-        self.par_dir = os.path.dirname(self.code_dir)  # parent directory
-        self.raw_data_dir = os.path.join(self.par_dir, "data", "raw_data")
-        self.data_checker_dir = os.path.join(
-            self.raw_data_dir, "data_checker_outputs"
-        )  # stores data checker outputs
-        self.data_dir = os.path.join(
-            self.par_dir, "data", self.model_name
-        )  # stores data/input
-        self.output_dir = os.path.join(
-            self.par_dir, "output", self.model_name
-        )  # stores inference results
-        self.logs_dir = os.path.join(
-            self.par_dir, "logs", self.model_name
-        )  # training log for tensorboard
-        self.ckpts_dir = os.path.join(
-            self.par_dir, "ckpts", self.model_name
-        )  # check points for accidental pauses
-        self.models_dir = os.path.join(
-            self.par_dir, "models", self.model_name
-        )  # trained models are stored here
-        self.diag_dir = os.path.join(
-            self.par_dir, "diagnostics", self.model_name
-        )  # diagnostics
-        self.plots_dir = os.path.join(
-            self.par_dir, "diagnostics", self.model_name, "plots"
-        )  # diagnostic plots
+        self.par_dir = self.code_dir.parents[0]  # parent directory
+        self.raw_data_dir = self.par_dir / "data" / "raw_data"
+        # stores data checker outputs
+        self.data_checker_dir = self.raw_data_dir / "data_checker_outputs"
+        # stores extracted features
+        self.data_dir = self.par_dir / "data" / self.model_name
+        # stores extracted features
+        self.output_dir = self.par_dir / "output" / self.model_name
+        # training log for tensorboard
+        self.logs_dir = self.par_dir / "logs" / self.model_name
+        # check points for accidental pauses
+        self.ckpts_dir = self.par_dir / "ckpts" / self.model_name
+        # trained models are stored here
+        self.models_dir = self.par_dir / "models" / self.model_name
+        # diagnostics
+        self.diag_dir = self.par_dir / "diagnostics" / self.model_name
+        # diagnostic plots
+        self.plots_dir = self.par_dir / "diagnostics" / self.model_name / "plots"
 
         # Define paths to files
-        self.RESERVE_settings_path = os.path.join(self.par_dir, "data", "RESERVE_settings.xlsx")
-        self.shuffled_indices_path = os.path.join(
-            self.data_dir, "shuffled_indices_{}.npy".format(self.model_name)
+        # TODO: separate the definition into the generic and specific portion
+        self.RESERVE_input_path = self.raw_data_dir / "RESERVE_input_v1.xlsx"
+        self.shuffled_indices_path = self.data_dir / "shuffled_indices_{}.npy".format(
+            self.model_name
         )
-        self.input_trainval_path = os.path.join(self.data_dir, "input_trainval.pkl")
-        self.output_trainval_path = os.path.join(self.data_dir, "output_trainval.pkl")
-        self.pred_trainval_path = os.path.join(self.output_dir, "pred_trainval.pkl")
-        self.training_hist_path = os.path.join(self.diag_dir, "training_history.npy")
-        self.metrics_path = os.path.join(self.diag_dir, "metrics.npy")
+        self.input_trainval_path = self.data_dir / "input_trainval.pkl"
+        self.output_trainval_path = self.data_dir / "output_trainval.pkl"
+        self.pred_trainval_path = self.output_dir / "pred_trainval.pkl"
+        self.training_hist_path = self.diag_dir / "training_history.npy"
+        self.metrics_path = self.diag_dir / "metrics.npy"
 
         # clear all contents in the log directory
-        if os.path.exists(self.logs_dir):
+        if Path.exists(self.logs_dir):
             shutil.rmtree(self.logs_dir)
 
         # make these directories if they do not already exist
@@ -92,5 +85,4 @@ class Dir_Structure:
             self.diag_dir,
             self.plots_dir,
         ]:
-            if not os.path.exists(folder):
-                os.makedirs(folder)
+            Path.mkdir(folder, parents=True, exist_ok=True)

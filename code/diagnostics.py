@@ -91,7 +91,7 @@ def plot_comparative_data(comp_pred_df, comp_name, fig, ax, color_idx=2):
 
 def overlay_comparative_methods(comparative_reserves, fig, ax):
     """"""
-    # Overlay the prediction from other models if wanted and approriate
+    # Overlay the prediction from other models if wanted and appropriate
     for i, comp_name in enumerate(comparative_reserves.keys()):
         color_idx = 2 + i
         reserve = comparative_reserves[comp_name]
@@ -495,7 +495,7 @@ def get_multiple_model_metrics(models_to_compare, output_for_pareto_comp):
     for model_name in models_to_compare:
         print("Calculating metrics for ", model_name)
         # Load in/ Create folder structure for the current model
-        dir_str = utility.Dir_Structure(model_name=model_name)
+        dir_str = utility.DirStructure(model_name=model_name)
 
         # Read in predictions, targets, and validation masks for the current model
         pred_trainval = pd.read_pickle(dir_str.pred_trainval_path)

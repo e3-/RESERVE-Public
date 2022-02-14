@@ -1,11 +1,11 @@
 name: e3rescue
 
 channels:
-  - defaults
   - conda-forge
 
 dependencies:
   - python >= 3.7
+  - pip
   - matplotlib
   - numpy
   - pandas
@@ -13,6 +13,7 @@ dependencies:
   - scipy
   - xlrd
   - pvlib-python          # Package from Sandia NL for solar resource related functions
+  - xlwings               # package for excel reading and writing
   
   - pip:
     - tensorflow          # Machine learning

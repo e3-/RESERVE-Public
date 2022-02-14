@@ -145,7 +145,7 @@ def pinball_loss(y_true, y_pred, tau=0.975, **kwargs):
     """
 
     Args:
-        y_true: Time seriers of observed forecast errors
+        y_true: Time series of observed forecast errors
         y_pred: Time series of corresponding conditional quantile estimates from machine learning model
         tau: Target percentile for quantile estimates (needed within calculation); default = 0.975
 
@@ -182,7 +182,7 @@ def reserve_ramp_rate(y_true, y_pred, **kwargs):
     )
 
 
-# Define function to compute/writeout metrics
+# Define function to compute and write out metrics
 
 
 def compute_metrics_for_specified_tau(
@@ -357,7 +357,7 @@ def n_crossings(pred_trainval, filename=None):
     df.index.rename(["Lower Quantile", "Upper Quantile"], inplace=True)
 
     if filename != None:
-        df.to_csv(filename)  # Writeout to CSV file
+        df.to_csv(filename)  # Write out to CSV file
 
     return df
 
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     model_name = "rescue_v1_1_multi_objective"
     num_cv_folds = 10
 
-    dir_str = utility.Dir_Structure(model_name=model_name)
+    dir_str = utility.DirStructure(model_name=model_name)
     input_trainval = pd.read_pickle(dir_str.input_trainval_path)
     output_trainval = pd.read_pickle(dir_str.output_trainval_path)
     val_masks_all_folds = cross_val.get_CV_masks(

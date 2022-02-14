@@ -1,5 +1,5 @@
 import pandas as pd
-from pandas.tseries.holiday import USFederalHolidayCalendar as calendar
+from pandas.tseries.holiday import USFederalHolidayCalendar as Calendar
 import numpy as np
 import pvlib
 
@@ -13,8 +13,7 @@ class CalendricalPredictors(object):
         Reference for formula:C.B.Honsberg and S.G.Bowden, “Photovoltaics Education Website,” www.pveducation.org, 2019
         Args:
             dt_series:
-            lat:
-            long:
+            configs:
         """
         geo_params = ["latitude", "longitude", "tz_from_utc"]
         for geo_param in geo_params:
@@ -40,7 +39,7 @@ class CalendricalPredictors(object):
         non_feature_attrs = geo_params + [
             "dt_series",
             "data",
-        ]  # the attributes that doesn't end up being features
+        ]  # the attributes that don't end up as features
 
         for temporal_feature in configs.temporal_features.index:
             if configs.temporal_features.loc[temporal_feature, "To include?"]:
@@ -55,7 +54,7 @@ class CalendricalPredictors(object):
                 elif isinstance(attribute_data, pd.DataFrame):
                     self.data = pd.concat([self.data, attribute_data], axis=1)
 
-        # generation the lag configuration for the calendar terms
+        # generation the lag configuration for the Calendar terms
         self.cal_term_configs = pd.DataFrame(
             1, index=self.data.columns, columns=configs.lag_term_configs.columns
         )
@@ -63,16 +62,18 @@ class CalendricalPredictors(object):
             0,
             0,
             1,
-        ]  # no reason to include lagged version of the calendar terms
+        ]  # no reason to include lagged version of the Calendar terms
 
     def get_holiday(self):
         """
         See if the datetime falls on a holiday
         """
-        holidays = calendar().holidays(
+        holidays = Calendar().holidays(
             start=self.dt_series.min(), end=self.dt_series.max()
         )
-        self.is_holiday = self.dt_series.isin(holidays)
+        self.is_holiday = pd.Series(
+            self.dt_series.isin(holidays), index=self.dt_series
+        ).astype("int")
 
     def get_day_of_week(self):
         # Day of week indicator. 7 binary indicator variables, one each for Mon to Sun
@@ -95,8 +96,8 @@ class CalendricalPredictors(object):
 
         # calculate revolution angle and sine and cosine values
         rev_angle = time_from_year_start / time_in_a_year * 2 * np.pi
-        self.sin_rev_angle = np.sin(rev_angle)
-        self.cos_rev_angle = np.cos(rev_angle)
+        self.sin_rev_angle = pd.Series(np.sin(rev_angle), index=self.dt_series)
+        self.cos_rev_angle = pd.Series(np.cos(rev_angle), index=self.dt_series)
 
     def get_rotation_angle(self):
         """
@@ -104,21 +105,25 @@ class CalendricalPredictors(object):
         """
         time_from_day_start = self.dt_series - self.dt_series.normalize()
         rot_angle = time_from_day_start / pd.Timedelta("1D") * 2 * np.pi
-        self.sin_rot_angle = np.sin(rot_angle)
-        self.cos_rot_angle = np.cos(rot_angle)
+        self.sin_rot_angle = pd.Series(np.sin(rot_angle), index=self.dt_series)
+        self.cos_rot_angle = pd.Series(np.cos(rot_angle), index=self.dt_series)
 
     def get_elapsed_time(self):
         """
-        Representing the temporal sequence of all the time points, especially important if there is growth in installation
-        or load. Represented as days or fraction of days since an arbitrarily defined start_date
+        Representing the temporal sequence of all the time points, especially important if there is growth in
+        installation or load. Represented as days or fraction of days since an arbitrarily defined start_date
 
         """
         self.elapsed_time = (self.dt_series - START_DATE).total_seconds() / 3600 / 24
+        self.elapsed_time = pd.Series(self.elapsed_time, index=self.dt_series)
 
     def get_solar_position(self):
+        UTC_time = self.dt_series - self.tz_from_utc * pd.Timedelta("1H")
         position_df = pvlib.solarposition.get_solarposition(
-            self.dt_series, self.latitude, self.longitude
+            UTC_time, self.latitude, self.longitude
         )
+        # Convert back to local time and to degrees
+        position_df = np.deg2rad(position_df.set_index(self.dt_series))
         self.sin_solar_zenith_angle = np.sin(position_df["apparent_zenith"])
         self.cos_solar_zenith_angle = np.cos(position_df["apparent_zenith"])
         self.sin_solar_azimuth_angle = np.sin(position_df["azimuth"])
@@ -133,7 +138,7 @@ def calculate_clear_sky_output(
     Args:
         datetime_arr(pd.DatetimeIndex)
         latitude(float): Latitude to be used to calculate solar elevation
-        longitude(float): Longitude to be used to calculate local solar time in degrees. East->postive, West->Negative
+        longitude(float): Longitude to be used to calculate local solar time in degrees. East->positive, West->Negative
         time_difference_from_UTC(int/float): Time-difference (in hours) between local time and
             Universal Coordinated TIme (UTC)
 
