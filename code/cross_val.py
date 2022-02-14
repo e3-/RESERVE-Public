@@ -96,7 +96,7 @@ def create_val_masks_for_each_fold(day_block_shuffled_indices, num_of_cv_folds):
     based on current fold idx and total number of folds to be created.
 
     :param num_of_cv_folds: Int: Total # of cross-validation folds
-    :param day_block_shuffled_indices: np.array comprising of indices that are shuffled as intra-day consecutive blocks
+    :param day_block_shuffled_indices: np.array consisting of indices that are shuffled as intraday consecutive blocks
     :return: val_masks_all_folds: A boolean 2D np array. The first dimension corresponds to the num_of_cv_folds,
              while the 2nd dimension is for each sample. True means this sample belongs to the validation set
              in this cross validation fold.
