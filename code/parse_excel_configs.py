@@ -62,7 +62,9 @@ class ExcelConfigs(object):
             # list each row of the main parameters tab as an attribute
             for param_name in self.main_parameters.index:
                 attr_name = param_name.lower().replace(" ", "_")
-                self.__setattr__(attr_name, self.main_parameters.loc[param_name, "Value"])
+                self.__setattr__(
+                    attr_name, self.main_parameters.loc[param_name, "Value"]
+                )
         else:
             print("main paramters tab not found, highly recommended to define one")
 
