@@ -411,6 +411,8 @@ def create_trainval_test_infer_sets(
                     io_data_df.columns[is_looking_for_input == is_feature_input]
                 ]
 
+                set_io_df = set_io_df.apply(pd.to_numeric)
+
                 # save to hard drive
                 filename = "{}_{}.pkl".format(input_or_output, set_name)
                 if (
