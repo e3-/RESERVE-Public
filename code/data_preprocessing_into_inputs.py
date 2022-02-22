@@ -238,7 +238,7 @@ def calculate_forecast_error(ts_data_df, configs, dir_str):
     fc_err_multipliers = (is_upward_reserve - 0.5) * 2  # convert (0,1) to (-1,1)
     fc_err_df = pd.DataFrame(index=ts_data_df.index)
     for ts_cat in ts_attrs["Category"].unique():
-        fc_error_name = ts_cat + "_forecast_error"
+        fc_error_name = ts_cat + "_Forecast_Error"
         mask_of_category = (ts_attrs["Category"] == ts_cat) & (
             ts_attrs["Impacts Forecast Error?"]
         )
@@ -256,7 +256,7 @@ def calculate_forecast_error(ts_data_df, configs, dir_str):
 
     # save to hard drive
     # Calculate net load forecast error by adding this category's forecast error
-    fc_err_df["net_load_forecast_error"] = fc_err_df.sum(
+    fc_err_df["Net_Load_Forecast_Error"] = fc_err_df.sum(
         axis=1, min_count=fc_err_df.shape[1]
     )
     fc_err_df.to_csv(os.path.join(dir_str.data_checker_dir, "total_fc_error.csv"))
