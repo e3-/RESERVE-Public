@@ -1,23 +1,6 @@
 import os
 import numpy as np
 import pandas as pd
-import pathlib
-from utility import DirStructure
-from parse_excel_configs import ExcelConfigs
-from calendrical_predictors import CalendricalPredictors
-import pvlib
-
-# ==== Constants  ====
-# Column names used in data-checker output files
-COL_NAME_VALUE = "Value_Interval_Avg"
-COL_NAME_VALIDITY = "valid_all_checks"
-COL_NAME_DATETIME = "Datetime_Interval_Start"
-
-# Input excel name
-INPUT_EXCEL_NAME = pathlib.Path("RESERVE_input_v1.xlsx")
-
-# Relationship between lag, lead, input and output
-io_lag_lead_map = {"input": "lag", "output": "lead"}
 
 
 def synthesize_forecast(configs, dir_str):
@@ -30,6 +13,7 @@ def synthesize_forecast(configs, dir_str):
     """
 
     fc_configs = configs.forecast_configs  # alias
+    fc_contrib = configs.forecast_error_contribution  # alias
     ts_attrs = configs.timeseries_attributes  # alias
 
     # loop through all the timeseries in the forecast configs tab
@@ -39,7 +23,7 @@ def synthesize_forecast(configs, dir_str):
             # TODO: if forecast exists then skip this process
             print("... Synthesizing forecast for {}...".format(ts_name))
             # extract lead time and convert it to amount of lead term
-            lead_time = pd.Timedelta(fc_configs.loc[ts_name, "Lead Time"])
+            forecast_horizon = pd.Timedelta(fc_configs.loc[ts_name, "Forecast Horizon"])
             ts_csv_df = pd.read_csv(
                 os.path.join(
                     dir_str.data_checker_dir, ts_attrs.loc[ts_name, "File Name"]
@@ -52,14 +36,14 @@ def synthesize_forecast(configs, dir_str):
             if fc_configs.loc[ts_name, "Method"] == "persistence":
                 # For the persistence forecast, forecast for T + forecast_lead_time
                 # is the value of that timeseries at T time
-                ts_forecast = ts_csv_df.set_index(ts_csv_df.index + lead_time)
+                ts_forecast = ts_csv_df.set_index(ts_csv_df.index + forecast_horizon)
 
             elif fc_configs.loc[ts_name, "Method"] == "solar persistence":
                 # Slightly more complicated than the persistence method, it assumes that
                 # the cloudiness (solar output/ clear sky output) would remain the same
                 zenith_fc = pvlib.solarposition.get_solarposition(
                     ts_csv_df.index
-                    + lead_time
+                    + forecast_horizon
                     - configs.tz_from_utc * pd.Timedelta("1h"),
                     configs.latitude,
                     configs.longitude,
@@ -75,7 +59,7 @@ def synthesize_forecast(configs, dir_str):
                 )
                 # Cap adjustment factors at 2
                 cos_zenith_ratio = np.clip(cos_zenith_ratio, a_min=0, a_max=2)
-                ts_forecast = ts_csv_df.set_index(ts_csv_df.index + lead_time)
+                ts_forecast = ts_csv_df.set_index(ts_csv_df.index + forecast_horizon)
                 ts_forecast[COL_NAME_VALUE] *= cos_zenith_ratio
 
             else:
@@ -85,7 +69,7 @@ def synthesize_forecast(configs, dir_str):
 
             # Save forecast
             forecast_filename = "{}_forecast_T+{:.0f}min.csv".format(
-                ts_name, lead_time / pd.Timedelta("1T")
+                ts_name, forecast_horizon / pd.Timedelta("1T")
             )
             ts_forecast.to_csv(
                 os.path.join(dir_str.data_checker_dir, forecast_filename)
@@ -93,14 +77,15 @@ def synthesize_forecast(configs, dir_str):
 
             # Add the ts forecast to the timeseries.
             ts_fc_name = ts_name + "_forecast"
-            ts_attrs.loc[ts_fc_name] = ts_attrs.loc[ts_name]
-            ts_attrs.loc[ts_fc_name, "Forecast or Actual"] = "Forecast"
+            fc_contrib.loc[ts_fc_name] = fc_contrib.loc[ts_name]
+            fc_contrib.loc[ts_fc_name, "Forecast or Actual"] = "Forecast"
             ts_attrs.loc[ts_fc_name, "File Name"] = forecast_filename
             ts_attrs.loc[ts_fc_name, ["Is Input?", "Is Output?"]] = [True, False]
 
             # Generate lag terms configs for it
             configs.lag_term_configs.loc[ts_fc_name] = fc_configs.loc[
-                ts_name, ["Lag Start", "Lag End", "Lag Step"]
+                ts_name,
+                ["Forecast Term Start", "Forecast Term End", "Forecast Term Step"],
             ].values
 
     return configs
@@ -227,47 +212,62 @@ def calculate_forecast_error(ts_data_df, configs, dir_str):
     equal to the number of timeseries category +1
     """
     # Initialize df to store response variable(s)
-    ts_attrs = configs.timeseries_attributes
-    lead = configs.synthesized_forecast_error_lead
+    fe_contrib = configs.forecast_error_contribution
+    fe_configs = configs.forecast_error_configs
 
     # when actual load is higher than forecast or when forecast gen is higher than
     # actual, you need upward reserve
-    is_upward_reserve = (ts_attrs["Generation or Load"] == "Load") == (
-        ts_attrs["Forecast or Actual"] == "Actual"
+    is_upward_reserve = (fe_contrib["Generation or Load"] == "Load") == (
+        fe_contrib["Forecast or Actual"] == "Actual"
     )
     fc_err_multipliers = (is_upward_reserve - 0.5) * 2  # convert (0,1) to (-1,1)
     fc_err_df = pd.DataFrame(index=ts_data_df.index)
-    for ts_cat in ts_attrs["Category"].unique():
-        fc_error_name = ts_cat + "_forecast_error"
-        mask_of_category = (ts_attrs["Category"] == ts_cat) & (
-            ts_attrs["Impacts Forecast Error?"]
-        )
-        # pick out the timeseries of this category, and assign positive and negative
-        # based on forecast/actual
-        ts_fc_err = (
-            ts_data_df[ts_data_df.columns[mask_of_category]]
-            * fc_err_multipliers[mask_of_category].values
-        )
-        # No NaN is allowed in the summation process. Any NaN would nullify the
-        # entire row
-        fc_err_df[fc_error_name] = ts_fc_err.sum(
-            min_count=mask_of_category.sum(), axis=1
-        )
+    for fe_cat in fe_configs.index:
+        if fe_cat == "Net Load Forecast Error":
+            continue
+
+        if fe_configs.loc[fe_cat, "Synthesize Error?"]:
+            fc_error_name = fe_cat + "_Forecast_Error"
+            mask_of_category = (fe_contrib["Category"] == fe_cat) & (
+                fe_contrib["Impacts Forecast Error?"]
+            )
+            # pick out the timeseries of this category, and assign positive and negative
+            # based on forecast/actual
+            ts_fc_err = (
+                ts_data_df[ts_data_df.columns[mask_of_category]]
+                * fc_err_multipliers[mask_of_category].values
+            )
+            # No NaN is allowed in the summation process. Any NaN would nullify the
+            # entire row
+            fc_err_df[fc_error_name] = ts_fc_err.sum(
+                min_count=mask_of_category.sum(), axis=1
+            )
+            configs.lead_term_configs.loc[fc_error_name] = fe_configs.loc[
+                fe_cat,
+                [
+                    "Error Lead Term Start",
+                    "Error Lead Term End",
+                    "Error Lead Term Step",
+                ],
+            ].values
 
     # save to hard drive
     # Calculate net load forecast error by adding this category's forecast error
-    fc_err_df["net_load_forecast_error"] = fc_err_df.sum(
-        axis=1, min_count=fc_err_df.shape[1]
-    )
-    fc_err_df.to_csv(os.path.join(dir_str.data_checker_dir, "total_fc_error.csv"))
+    if fe_configs.loc["Net Load Forecast Error", "Synthesize Error?"]:
+        fc_err_df["Net_Load_Forecast_Error"] = fc_err_df.sum(
+            axis=1, min_count=fc_err_df.shape[1]
+        )
+        configs.lead_term_configs.loc["Net_Load_Forecast_Error"] = fe_configs.loc[
+            fe_cat,
+            [
+                "Error Lead Term Start",
+                "Error Lead Term End",
+                "Error Lead Term Step",
+            ],
+        ].values
+        fc_err_df.to_csv(os.path.join(dir_str.data_checker_dir, "total_fc_error.csv"))
 
-    # Define the lag terms and lead terms generated by the forecast error time series
-    fc_lead_term = pd.DataFrame(
-        1, index=fc_err_df.columns, columns=configs.lead_term_configs.columns
-    )
-    fc_lead_term *= [lead, lead, 1]
-
-    return fc_err_df, fc_lead_term
+    return fc_err_df
 
 
 def pad_data_w_buffer(ts_data_df, lag_term_configs, lead_term_configs, sample_interval):
@@ -416,7 +416,7 @@ def create_trainval_test_infer_sets(
                 if (
                     len(set_io_df.index) >= 1
                 ):  # if there is no data then don't print out anything
-                    set_io_df.to_pickle(data_dir / filename)
+                    set_io_df.astype("float32").to_pickle(data_dir / filename)
                 else:
                     print(
                         "{} for {} set is empty. Please double check!".format(
@@ -462,60 +462,3 @@ def concat_sub_ts(ts_data_df, sub_ts_dict, configs):
                     setattr(configs, term_configs_name, term_configs)
 
     return ts_data_df
-
-
-def main():
-
-    print("=== Step 1 of 5, Parse model configs from {} ===".format(INPUT_EXCEL_NAME))
-    configs = ExcelConfigs(INPUT_EXCEL_NAME.resolve())
-    # Paths to read time files from. Defined in the dir_structure class in utility
-    dir_str = DirStructure(model_name=configs.model_name)
-
-    print("=== Step 2.1 of 5 synthesize forecast series when needed===")
-    configs = synthesize_forecast(configs, dir_str)
-
-    print("=== Step 2.2 of 5.Read in all timeseries ===")
-    # read in all timeseries files
-    ts_data_df, sub_ts_dict = read_all_timeseries(dir_str, configs)
-    # calculate response variables
-    # TODO: Add a check if no time series is defined as output and no response variable has been calculated
-    print("=== step 2.3 of 5 calculate forecast errors when required ===")
-    # This applies to RESERVE more than RECLAIM and is only required some but not at all times
-    if configs.synthesize_forecast_error:
-        fc_err_df, fc_lead_term = calculate_forecast_error(ts_data_df, configs, dir_str)
-        ts_data_df = pd.concat([ts_data_df, fc_err_df], axis=1, join="outer")
-        configs.lead_term_configs = pd.concat([configs.lead_term_configs, fc_lead_term])
-
-    # Replace timeseries with sub timeseries, applicable to down-sampled ts
-    ts_data_df = concat_sub_ts(ts_data_df, sub_ts_dict, configs)
-
-    print("=== Step 3 of 5, Calculating Calendar-based predictors === ")
-    cal_predictors = CalendricalPredictors(ts_data_df.index, configs)
-    ts_data_df = pd.concat([ts_data_df, cal_predictors.data], axis=1, join="outer")
-    configs.lag_term_configs = pd.concat(
-        [configs.lag_term_configs, cal_predictors.cal_term_configs]
-    )
-
-    print("=== Step 4 of 5, Vectorized construction of lag and lead terms ===")
-    # Pad the raw data with NaNs in both the lag and lead direction for downstream data manipulation
-    ts_data_df = pad_data_w_buffer(
-        ts_data_df,
-        configs.lag_term_configs,
-        configs.lead_term_configs,
-        configs.sample_interval,
-    )
-    io_data_df, is_feature_input = generate_lag_and_lead_terms(
-        ts_data_df, configs.lag_term_configs, configs.lead_term_configs
-    )
-
-    print("=== Step 5 of 5. Separate trainval, test and inference sets and save ===")
-    create_trainval_test_infer_sets(
-        io_data_df, configs.starts_and_ends, is_feature_input, dir_str.data_dir
-    )
-
-    print("All done!")
-
-
-# run as a script
-if __name__ == "__main__":
-    main()
