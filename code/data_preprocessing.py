@@ -6,16 +6,8 @@ from calendrical_predictors import CalendricalPredictors
 from data_preprocessing_util import *
 
 # ==== Constants  ====
-# Column names used in data-checker output files
-COL_NAME_VALUE = "Value_Interval_Avg"
-COL_NAME_VALIDITY = "valid_all_checks"
-COL_NAME_DATETIME = "Datetime_Interval_Start"
-
 # Input excel name
 INPUT_EXCEL_NAME = pathlib.Path("RESERVE_input_v1.xlsx")
-
-# Relationship between lag, lead, input and output
-io_lag_lead_map = {"input": "lag", "output": "lead"}
 
 
 def main():

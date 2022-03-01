@@ -1,6 +1,15 @@
 import os
 import numpy as np
 import pandas as pd
+import pvlib
+
+# Column names used in data-checker output files
+COL_NAME_VALUE = "Value_Interval_Avg"
+COL_NAME_VALIDITY = "valid_all_checks"
+COL_NAME_DATETIME = "Datetime_Interval_Start"
+
+# Relationship between lag, lead, input and output
+io_lag_lead_map = {"input": "lag", "output": "lead"}
 
 
 def synthesize_forecast(configs, dir_str):
