@@ -231,7 +231,7 @@ def plot_uncertainty_groupedby_feature(
     """
 
     # Group model predictions and ground truth  based on discretized input variable
-    pred_val_groupedby_input = pred_val.groupby(input_var_discretized.values).mean()
+    pred_val_groupedby_input = pred_val.groupby(input_var_discretized).mean()
 
     # Prepare ax array
     fig, ax = plt.subplots()
