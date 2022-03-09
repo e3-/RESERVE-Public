@@ -12,6 +12,41 @@ COL_NAME_DATETIME = "Datetime_Interval_Start"
 io_lag_lead_map = {"input": "lag", "output": "lead"}
 
 
+def get_typical_1axis_CSO(dt_array, lat, lon):
+    """
+    Assume there's a typical 1axis solar array installed at (lat, lon), calculate the cosine of incidence angle for
+    each entry of the dt_array. Typical is defined as a one-axis tracking solar array, that has a "N-S" axis and no
+    tilt. For reference: https://www.powerfromthesun.net/Book/chapter04/chapter04.html#4.1.2%20Single-Axis%20Tracking%20Apertures
+
+    :param dt_array: pd.DatetimeIndex. A series of date times that incidence should be calculated.
+    :param lat: float. Latitude of the solar installation.
+    :param lon: float. Longitude of the solar installation
+    :return: cos_incidence: pd.series of float. Cosine of the incidence angles.
+    """
+
+    typical_single_axis_mount = pvlib.pvsystem.SingleAxisTrackerMount(
+        axis_tilt=0, axis_azimuth=180, backtrack=False
+    )
+    loc = pvlib.location.Location(lat, lon)
+    # default for these module parameters.
+    # pdc0 is output under 1KW/m2, size of panel. gamma_pdc relates to temp model
+    # pdc0 for inverter is the inverter size limit, choose bigger than first pdc0
+    array = pvlib.pvsystem.Array(
+        mount=typical_single_axis_mount,
+        module_parameters=dict(pdc0=1, gamma_pdc=-0.004, b=0.05),
+        temperature_model_parameters=dict(a=-3.56, b=-0.075, deltaT=3),
+    )
+    system = pvlib.pvsystem.PVSystem(arrays=[array], inverter_parameters=dict(pdc0=3))
+    mc = pvlib.modelchain.ModelChain(system, loc, spectral_model="no_loss")
+
+    weather = loc.get_clearsky(dt_array)
+    mc.run_model(weather)
+
+    results = mc.results.ac
+
+    return results
+
+
 def synthesize_forecast(configs, dir_str):
     """
     Synthesize forecast of certain timeseries, which almost always comes from persistence
@@ -50,26 +85,29 @@ def synthesize_forecast(configs, dir_str):
             elif fc_configs.loc[ts_name, "Method"] == "solar persistence":
                 # Slightly more complicated than the persistence method, it assumes that
                 # the cloudiness (solar output/ clear sky output) would remain the same
-                zenith_fc = pvlib.solarposition.get_solarposition(
+                # And assumes the usage of a one-axis tracking panels with N-S axis
+
+                clear_sky_output_fc = get_typical_1axis_CSO(
                     ts_csv_df.index
                     + forecast_horizon
                     - configs.tz_from_utc * pd.Timedelta("1h"),
                     configs.latitude,
                     configs.longitude,
-                )["apparent_zenith"]
-                zenith = pvlib.solarposition.get_solarposition(
+                )
+
+                clear_sky_output = get_typical_1axis_CSO(
                     ts_csv_df.index - configs.tz_from_utc * pd.Timedelta("1h"),
                     configs.latitude,
                     configs.longitude,
-                )["apparent_zenith"]
+                )
 
-                cos_zenith_ratio = np.cos(np.deg2rad(zenith_fc.values)) / np.cos(
-                    np.deg2rad(zenith.values)
+                cso_ratio = (clear_sky_output_fc.values + 1e-4) / (
+                    clear_sky_output.values + 1e-4
                 )
                 # Cap adjustment factors at 2
-                cos_zenith_ratio = np.clip(cos_zenith_ratio, a_min=0, a_max=2)
+                cso_ratio = np.clip(cso_ratio, a_min=0.5, a_max=2)
                 ts_forecast = ts_csv_df.set_index(ts_csv_df.index + forecast_horizon)
-                ts_forecast[COL_NAME_VALUE] *= cos_zenith_ratio
+                ts_forecast[COL_NAME_VALUE] *= cso_ratio
 
             else:
                 raise ValueError(
